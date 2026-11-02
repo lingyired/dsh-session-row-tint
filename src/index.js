@@ -38,15 +38,25 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload))
 }
 
+/** A valid stored icon: `lucide:<name>`, or up to four emoji / characters. */
+function cleanIcon(value) {
+  if (typeof value !== 'string') return undefined
+  const raw = value.trim()
+  if (raw.startsWith('lucide:')) {
+    const name = raw.slice('lucide:'.length)
+    return /^[a-z0-9-]{1,48}$/.test(name) ? `lucide:${name}` : undefined
+  }
+  const text = Array.from(raw).slice(0, 4).join('')
+  return text === '' ? undefined : text
+}
+
 /** One decoration cleaned to the fields the browser understands. */
 function cleanDecoration(input) {
   const out = {}
   if (input === null || typeof input !== 'object' || Array.isArray(input)) return out
   if (typeof input.color === 'string' && HEX_COLOR.test(input.color)) out.color = input.color
-  if (typeof input.icon === 'string') {
-    const icon = Array.from(input.icon.trim()).slice(0, 4).join('')
-    if (icon !== '') out.icon = icon
-  }
+  const icon = cleanIcon(input.icon)
+  if (icon !== undefined) out.icon = icon
   return out
 }
 
@@ -165,9 +175,9 @@ export function apply(ctx, config = {}) {
           if (body.color === null || body.color === '') delete current.color
           else if (typeof body.color === 'string' && HEX_COLOR.test(body.color)) current.color = body.color
           if (body.icon === null || body.icon === '') delete current.icon
-          else if (typeof body.icon === 'string') {
-            const icon = Array.from(body.icon.trim()).slice(0, 4).join('')
-            if (icon !== '') current.icon = icon
+          else {
+            const icon = cleanIcon(body.icon)
+            if (icon !== undefined) current.icon = icon
             else delete current.icon
           }
           if (current.color === undefined && current.icon === undefined) delete doc[bucket][id]
