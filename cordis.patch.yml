@@ -1,0 +1,9 @@
+# Bundle mount for dsh-session-row-tint: one Host-side loader entry.
+#
+# `name` is the Node-resolvable package name and must stay in sync with
+# package.json; `id` is the local mount id, so profile config keys (such as the
+# dataDir added in the profile's own patch) keep the short `dsh-session-row-tint`
+# spelling.
+- insert:
+    - id: dsh-session-row-tint
+      name: dsh-session-row-tint

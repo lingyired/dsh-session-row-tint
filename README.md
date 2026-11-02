@@ -6,7 +6,7 @@
 - **会话**：标题文字用该会话自己的颜色（不铺背景，避免和工作区底色叠在一起发浑），左侧状态点可换成 emoji / 文字。
 - **右键**任意会话行或工作区行即可打开小面板选颜色 / 图标，数据持久化在 profile 数据目录，重启不丢。
 
-> 依赖插件 [`@idoall/dsh-session-colors`](https://github.com/idoall/dsh-session-colors)：会话颜色标记、会话头部的取色器、以及 `GET /plugins/dsh-session-colors/marks` 由它提供。本插件在其之上叠加工作区装饰、会话 emoji 图标，并把会话颜色改成标题文字色。
+> 可选依赖 [`@idoall/dsh-session-colors`](https://github.com/idoall/dsh-session-colors)：如果装了它，它的会话颜色标记（`GET /plugins/dsh-session-colors/marks`）会被读作会话标题文字色；不装也能用，颜色 / 图标全部由本插件自己的右键面板与存储提供。
 
 ## 截图
 
@@ -27,33 +27,37 @@
 
 ## 安装
 
-前提：已经安装并启用了 [`@idoall/dsh-session-colors`](https://github.com/idoall/dsh-session-colors)。
+本插件是一个标准 **profile bundle**（`package.json` 声明了 `dsh.bundle.patch`），因此会出现在 DSH 的「插件」列表里，可以像其它 bundle 一样开关。
 
-1. 把本仓库放到任意稳定目录，例如 `~/.dsh/local-plugins/dsh-session-row-tint`。
-
-2. 在目标 profile 的 `package.json` 里加一条本地依赖（`<profile>` 换成你的 profile，如 `desktop`）：
+1. 在目标 profile 的 `package.json` 里加依赖并登记 bundle（`<profile>` 换成你的 profile，如 `desktop`）：
 
    ```json
    {
      "dependencies": {
-       "dsh-session-row-tint": "link:/absolute/path/to/dsh-session-row-tint"
+       "dsh-session-row-tint": "github:lingyired/dsh-session-row-tint"
+     },
+     "dsh": {
+       "profile": {
+         "bundles": [
+           "dsh-session-row-tint"
+         ]
+       }
      }
    }
    ```
 
-3. 在 profile 的 `cordis.patch.yml` 末尾插入本插件（`dataDir` 换成你的 profile 数据目录）：
+2. 在 profile 的 `cordis.patch.yml` 末尾给 bundle 插入的条目配 `dataDir`（换成你的 profile 数据目录）：
 
    ```yaml
-   - insert:
-       - id: dsh-session-row-tint
-         name: dsh-session-row-tint
-         config:
-           dataDir: /absolute/path/to/profiles/<profile>/data/dsh-session-row-tint
+   - id: dsh-session-row-tint
+     name: dsh-session-row-tint
+     config:
+       dataDir: /absolute/path/to/profiles/<profile>/data/dsh-session-row-tint
    ```
 
-4. 在该 profile 目录执行 `pnpm install`。
+3. 在该 profile 目录执行 `pnpm install`。
 
-5. **重启 DeepSeek Harness**（宿主半边只在启动时装载），刷新页面。
+4. **重启 DeepSeek Harness**（宿主半边只在启动时装载），刷新页面。
 
 > 不配 `dataDir` 也能用，但颜色/图标只活在宿主进程内存里，重启即丢。
 
@@ -94,9 +98,10 @@
 ## 目录
 
 ```
-src/index.js   宿主半边：workspaces/sessions 装饰存储 + HTTP 路由
-src/client.js  浏览器半边：shell.overlay 浮层、右键面板、渲染
-docs/images/   演示截图（脱敏示例数据）
+cordis.patch.yml  bundle 挂载：往 loader 插入宿主条目
+src/index.js      宿主半边：workspaces/sessions 装饰存储 + HTTP 路由
+src/client.js     浏览器半边：shell.overlay 浮层、右键面板、渲染
+docs/images/      演示截图（脱敏示例数据）
 ```
 
 ## License

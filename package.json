@@ -16,10 +16,14 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "src"
+    "src",
+    "cordis.patch.yml"
   ],
   "dsh": {
     "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "inject": [
