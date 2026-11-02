@@ -22,7 +22,8 @@
 
 - **工作区行**「...」→「颜色 / 图标」：设置该工作区背景色（整块）与文件夹图标。
 - **会话行**「...」→「颜色 / 图标」：设置该会话标题文字颜色与左侧图标。
-- 面板支持：18 个预设颜色一键选用、系统取色器、可搜索的 [Lucide](https://lucide.dev)（MIT）开源图标（按英文名或中文关键词搜索，内置两百多个）、可自定义输入 emoji / 文字、清除颜色 / 清除全部。
+- 面板支持：18 个预设颜色一键选用、系统取色器、可搜索的图标库（2000+：日常 [Lucide](https://lucide.dev) 图标 + [Simple Icons](https://simpleicons.org) 品牌 logo，含微信 / 支付宝 / B 站 / 知乎 / 微博 / 淘宝 / 小红书 等中文社区，以及 OpenAI / Claude / Gemini / DeepSeek / Qwen / Kimi / Ollama / HuggingFace 等 AI 与厂商），按英文名或中文关键词搜索；也可直接输入 emoji / 文字。
+- 图标目录由宿主路由 `GET /plugins/dsh-session-row-tint/icons` 提供（数据在 `src/icons.json`），不打包进前端，便于扩充。
 - 颜色/图标按 id 存到一个 JSON 文件（原子写入），跨重启保留。
 
 ## 安装
@@ -77,6 +78,7 @@
   - `GET  /plugins/dsh-session-row-tint/decorations` → `{ workspaces, sessions, storage }`
   - `POST /plugins/dsh-session-row-tint/workspaces` → `{ workspaceId, color?, icon? }`
   - `POST /plugins/dsh-session-row-tint/sessions`  → `{ sessionId, color?, icon? }`
+  - `GET  /plugins/dsh-session-row-tint/icons`      → `{ icons, keywords, popular }`（图标目录）
 
 ## 实现要点
 
@@ -99,8 +101,9 @@
 
 ```
 cordis.patch.yml  bundle 挂载：往 loader 插入宿主条目
-src/index.js      宿主半边：workspaces/sessions 装饰存储 + HTTP 路由
-src/client.js     浏览器半边：shell.overlay 浮层、右键面板、渲染
+src/index.js      宿主半边：装饰存储 + icons/装饰 HTTP 路由
+src/icons.json    图标目录（Lucide + Simple Icons 品牌，宿主读取后经路由下发）
+src/client.js     浏览器半边：shell.overlay 浮层、「...」菜单入口、面板、渲染
 docs/images/      演示截图（脱敏示例数据）
 ```
 

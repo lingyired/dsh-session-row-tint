@@ -25,6 +25,20 @@ export const inject = []
 /** Route prefix owned by this plugin; the browser half uses the same constant. */
 export const ROUTE_PREFIX = '/plugins/dsh-session-row-tint'
 
+/** Static icon catalog (Lucide + Simple Icons brands) served to the browser half. */
+const ICONS_FILE = new URL('./icons.json', import.meta.url)
+let iconsBody
+function readIconsBody() {
+  if (iconsBody === undefined) {
+    try {
+      iconsBody = readFileSync(ICONS_FILE, 'utf8')
+    } catch {
+      iconsBody = '{"icons":{},"keywords":{},"popular":[]}'
+    }
+  }
+  return iconsBody
+}
+
 /** Request bodies are tiny: an id, a colour, and a short icon string. */
 const BODY_CAP = 64 * 1024
 
@@ -207,6 +221,17 @@ export function apply(ctx, config = {}) {
             return
           }
           await write(req, res, 'sessions', 'sessionId')
+        })
+        route('/icons', async (req, res) => {
+          if (req.method !== 'GET') {
+            sendJson(res, 405, { error: 'method not allowed' })
+            return
+          }
+          const body = readIconsBody()
+          res.statusCode = 200
+          res.setHeader('content-type', 'application/json; charset=utf-8')
+          res.setHeader('cache-control', 'public, max-age=3600')
+          res.end(body)
         })
       } catch {
         // A broken registration must not take the Host boot down.
