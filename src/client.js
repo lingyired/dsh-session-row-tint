@@ -509,39 +509,73 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         const decorateMenus = () => {
           try {
-            const rows = document.querySelectorAll('[data-row-key^="workspace:"],[data-row-key^="session:"]')
-            for (const row of rows) {
-              const items = row.querySelectorAll('[role="menuitem"]')
-              if (items.length === 0) continue
-              const container = items[0].parentElement
-              if (container === null || container === undefined) continue
-              if (container.querySelector('[data-dsh-srt-item]') !== null) continue
-              const wid = workspaceIdOf(row)
-              const id = wid !== undefined ? wid : sessionIdOf(row)
-              if (id === undefined) continue
-              const kind = wid !== undefined ? 'workspace' : 'session'
-              const item = document.createElement('button')
-              item.type = 'button'
-              item.setAttribute('role', 'menuitem')
-              item.setAttribute('data-dsh-srt-item', '')
-              item.className = items[0].className
-              item.textContent = '颜色 / 图标'
-              item.addEventListener('click', (event) => {
-                event.preventDefault()
-                event.stopPropagation()
-                openPickerRef.current(row, kind, id)
-                try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) } catch {}
-              })
-              container.appendChild(item)
+            // DSH renders a row's menu in a body portal, not inside the row; the
+            // row only gains a `*menuOpen` class while its menu is open. So find
+            // the open row for the target id, and append into the portal's list.
+            const openRows = document.querySelectorAll('[class*="menuOpen"][data-row-key]')
+            if (openRows.length === 0) return
+            const items = [...document.querySelectorAll('[role="menuitem"]')].filter((el) => {
+              const rect = el.getBoundingClientRect()
+              return rect.width > 0 && rect.height > 0
+            })
+            if (items.length === 0) return
+            const sample = items[0]
+            const wrapper = sample.parentElement
+            const container = wrapper === null || wrapper === undefined ? null : wrapper.parentElement
+            if (container === null || container === undefined) return
+            if (container.querySelector('[data-dsh-srt-item]') !== null) return
+            const row = openRows[0]
+            const wid = workspaceIdOf(row)
+            const id = wid !== undefined ? wid : sessionIdOf(row)
+            if (id === undefined) return
+            const kind = wid !== undefined ? 'workspace' : 'session'
+            // Clone the sample item so the row matches DSH's menu styling, then
+            // swap its icon for a palette and its label for ours.
+            const clone = sample.cloneNode(true)
+            clone.setAttribute('data-dsh-srt-item', '')
+            clone.setAttribute('data-srt-kind', kind)
+            clone.setAttribute('data-srt-id', id)
+            const svg = clone.querySelector('svg')
+            if (svg !== null && ICON_SET.palette !== undefined) {
+              svg.setAttribute('viewBox', '0 0 24 24')
+              svg.innerHTML = ICON_SET.palette
             }
+            const leaves = [...clone.querySelectorAll('*')].filter((el) => el.children.length === 0 && el.textContent.trim() !== '')
+            if (leaves[0] !== undefined) leaves[0].textContent = '颜色 / 图标'
+            for (const leaf of leaves.slice(1)) { if (/[⌥⌘⇧⌃]/.test(leaf.textContent)) leaf.remove() }
+            const box = document.createElement(wrapper.tagName)
+            box.className = wrapper.className
+            box.appendChild(clone)
+            container.appendChild(box)
           } catch {
             // Menu decoration is best effort; never break the menu.
           }
         }
+        // Registered before DSH's own menu listeners, and in the capture phase,
+        // so our item is handled before the menu unmounts on pointerdown.
+        const onPress = (event) => {
+          const target = event.target
+          if (target === null || target === undefined || typeof target.closest !== 'function') return
+          const ours = target.closest('[data-dsh-srt-item]')
+          if (ours === null) return
+          const kind = ours.getAttribute('data-srt-kind')
+          const id = ours.getAttribute('data-srt-id')
+          if (kind === null || id === null) return
+          event.preventDefault()
+          event.stopPropagation()
+          const prefix = kind === 'workspace' ? WORKSPACE_ROW_KEY : SESSION_ROW_KEY
+          const row = document.querySelector(`[data-row-key="${prefix}${id}"]`)
+          openPickerRef.current(row || document.body, kind, id)
+          try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) } catch {}
+        }
+        document.addEventListener('pointerdown', onPress, true)
         const observer = new MutationObserver(decorateMenus)
         observer.observe(document.body, { childList: true, subtree: true })
         decorateMenus()
-        return () => observer.disconnect()
+        return () => {
+          observer.disconnect()
+          document.removeEventListener('pointerdown', onPress, true)
+        }
       }, [])
 
       // Open the picker anchored to a row.
