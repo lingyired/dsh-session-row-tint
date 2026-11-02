@@ -1,0 +1,34 @@
+{
+  "name": "dsh-session-row-tint",
+  "version": "0.1.0",
+  "description": "DSH web plugin: per-Session and per-workspace colour + emoji icon decorations in the sidebar.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lingyired/dsh-session-row-tint.git"
+  },
+  "homepage": "https://github.com/lingyired/dsh-session-row-tint",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./src/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src"
+  ],
+  "dsh": {
+    "manifestVersion": 1,
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "react": "^18.2.0"
+  }
+}
