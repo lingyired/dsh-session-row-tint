@@ -133,7 +133,7 @@ window.__ModuleLoader__.load({
       const body = CATALOG.icons[value]
       if (body === undefined) return ''
       const px = Math.round(size)
-      return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 24 24" fill="currentColor">${body}</svg>`
+      return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd">${body}</svg>`
     }
 
     /** Filter the catalogue by icon name or by a Chinese/English keyword. */
