@@ -27,6 +27,7 @@
 - 图标网格**显示全部图标**（不搜索时按「常用优先 + 字母序」全部列出），并用**虚拟列表**按需渲染可见行（8 列固定行高 + 少量 overscan），几百个图标也不卡。
 - 图标区顶部有**「常用」一行**；在图标列表里**右键任意图标即可收藏/取消收藏**（收藏的图标右上角有小圆点提示）。
 - 图标区还有**「选择图片…」**：可上传 **SVG / PNG / JPG / WebP**（≤ 300KB）作为自定义图标，面板里带缩略图预览。图片以 data URL 存储（宿主未更新时先存在浏览器 localStorage 兜底）。
+- 面板右上角 **⚙ 尺寸设置**：拖动滑块调整「工作区图标大小 / 会话图标大小 / 工作区标题字号」，即时生效；宿主可用时写入 `decorations.json`，否则先存本地。
 - 颜色/图标按 id 存到一个 JSON 文件（原子写入），跨重启保留。
 
 ## 安装
@@ -89,6 +90,7 @@
   - `POST /plugins/dsh-session-row-tint/workspaces` → `{ workspaceId, color?, icon? }`
   - `POST /plugins/dsh-session-row-tint/sessions`  → `{ sessionId, color?, icon? }`
   - `POST /plugins/dsh-session-row-tint/favorites` → `{ icons: string[] }`（保存常用图标）
+  - `POST /plugins/dsh-session-row-tint/settings`  → `{ workspaceIconSize?, sessionIconSize?, workspaceFontSize? }`（保存尺寸设置）
   - `GET  /plugins/dsh-session-row-tint/icons`      → `{ icons, keywords, popular }`（图标目录）
 
 ## 实现要点
