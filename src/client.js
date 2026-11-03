@@ -48,6 +48,7 @@ window.__ModuleLoader__.load({
     const SESSIONS_ROUTE = '/plugins/dsh-session-row-tint/sessions'
     const ICONS_ROUTE = '/plugins/dsh-session-row-tint/icons'
     const FAVORITES_ROUTE = '/plugins/dsh-session-row-tint/favorites'
+    const FAVORITES_STORAGE_KEY = 'dsh-session-row-tint:favorites'
     const SESSION_ROW_KEY = 'session:'
     const WORKSPACE_ROW_KEY = 'workspace:'
     const LUCIDE_PREFIX = 'lucide:'
@@ -142,6 +143,26 @@ window.__ModuleLoader__.load({
     function iconName(value) {
       const at = value.indexOf(':')
       return at === -1 ? value : value.slice(at + 1)
+    }
+
+    /** Local fallback favourites, used until the Host route is available. */
+    function readLocalFavorites() {
+      try {
+        const raw = window.localStorage.getItem(FAVORITES_STORAGE_KEY)
+        if (raw === null) return null
+        const parsed = JSON.parse(raw)
+        return Array.isArray(parsed) ? parsed.filter((value) => typeof value === 'string') : null
+      } catch {
+        return null
+      }
+    }
+
+    function writeLocalFavorites(icons) {
+      try {
+        window.localStorage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(icons))
+      } catch {
+        // A blocked localStorage must not break favouriting.
+      }
     }
 
     /** Standalone SVG markup for one catalogue icon. */
@@ -294,6 +315,7 @@ window.__ModuleLoader__.load({
         '.dsh-srt-mini{height:30px;padding:0 10px;border:1px solid rgba(0,0,0,.15);border-radius:8px;background:#fff;color:#374151;font:inherit;cursor:pointer;flex:none}',
         '.dsh-srt-mini:hover{background:#eef1f6}',
         '.dsh-srt-search{box-sizing:border-box;width:100%;height:32px;margin-bottom:10px;padding:0 10px;border:1px solid rgba(0,0,0,.15);border-radius:9px;background:#fff;color:#1d1d1f;font:inherit}',
+        '.dsh-srt-sublabel{display:block;margin:-2px 0 8px;color:#9ca3af;font-size:11px}',
         '.dsh-srt-fav{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;max-height:64px;overflow:hidden}',
         '.dsh-srt-favbtn{width:30px;height:30px;flex:none}',
         '.dsh-srt-favempty{color:#9ca3af;font-size:12px;line-height:30px}',
@@ -523,7 +545,7 @@ window.__ModuleLoader__.load({
               setDecorations({
                 workspaces: decorBody.workspaces && typeof decorBody.workspaces === 'object' ? decorBody.workspaces : {},
                 sessions: decorBody.sessions && typeof decorBody.sessions === 'object' ? decorBody.sessions : {},
-                favorites: Array.isArray(decorBody.favorites) ? decorBody.favorites : null,
+                favorites: Array.isArray(decorBody.favorites) ? decorBody.favorites : readLocalFavorites(),
               })
             }
             follow()
@@ -730,6 +752,10 @@ window.__ModuleLoader__.load({
 
       const effectiveFavorites = Array.isArray(decorations.favorites) ? decorations.favorites : DEFAULT_FAVORITES
       const saveFavorites = async (icons) => {
+        // Optimistic + local fallback: works even before the Host half that
+        // owns /favorites has been (re)started; the Host overwrites it later.
+        writeLocalFavorites(icons)
+        setDecorations((prev) => ({ workspaces: prev.workspaces, sessions: prev.sessions, favorites: icons }))
         try {
           const response = await fetch(FAVORITES_ROUTE, {
             method: 'POST',
@@ -740,10 +766,12 @@ window.__ModuleLoader__.load({
           if (!response.ok) return false
           const payload = await response.json()
           if (payload && typeof payload === 'object') {
+            const favorites = Array.isArray(payload.favorites) ? payload.favorites : icons
+            writeLocalFavorites(favorites)
             setDecorations({
               workspaces: payload.workspaces && typeof payload.workspaces === 'object' ? payload.workspaces : {},
               sessions: payload.sessions && typeof payload.sessions === 'object' ? payload.sessions : {},
-              favorites: Array.isArray(payload.favorites) ? payload.favorites : null,
+              favorites,
             })
           }
           return true
@@ -847,6 +875,7 @@ window.__ModuleLoader__.load({
           h('button', { className: 'dsh-srt-mini', type: 'button', onClick: () => applyColor('') }, '清除颜色'),
         ),
         h('span', { className: 'dsh-srt-label' }, '图标'),
+        h('span', { className: 'dsh-srt-sublabel' }, '右键图标可收藏，再次右键取消'),
         h('div', { className: 'dsh-srt-fav' },
           effectiveFavorites.length === 0
             ? h('span', { className: 'dsh-srt-favempty' }, '右键下方图标可收藏到常用')
