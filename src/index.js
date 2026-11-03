@@ -235,13 +235,20 @@ export function apply(ctx, config = {}) {
           }
           const doc = store.get()
           const current = { ...(doc[bucket][id] ?? {}) }
-          if (body.color === null || body.color === '') delete current.color
-          else if (typeof body.color === 'string' && HEX_COLOR.test(body.color)) current.color = body.color
-          if (body.icon === null || body.icon === '') delete current.icon
-          else {
-            const icon = cleanIcon(body.icon)
-            if (icon !== undefined) current.icon = icon
-            else delete current.icon
+          const has = (key) => Object.prototype.hasOwnProperty.call(body, key)
+          // Only touch a field the request actually carries, so a colour-only
+          // update never drops the icon (and vice versa).
+          if (has('color')) {
+            if (body.color === null || body.color === '') delete current.color
+            else if (typeof body.color === 'string' && HEX_COLOR.test(body.color)) current.color = body.color
+          }
+          if (has('icon')) {
+            if (body.icon === null || body.icon === '') delete current.icon
+            else {
+              const icon = cleanIcon(body.icon)
+              if (icon !== undefined) current.icon = icon
+              else delete current.icon
+            }
           }
           if (current.color === undefined && current.icon === undefined) delete doc[bucket][id]
           else doc[bucket][id] = current

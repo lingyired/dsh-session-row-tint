@@ -865,14 +865,30 @@ window.__ModuleLoader__.load({
           if (!response.ok) return false
           const payload = await response.json()
           if (payload && typeof payload === 'object') {
-            setDecorations((prev) => withLocalImages({
-              workspaces: payload.workspaces && typeof payload.workspaces === 'object' ? payload.workspaces : {},
-              sessions: payload.sessions && typeof payload.sessions === 'object' ? payload.sessions : {},
-              // Keep the current favourites when the Host response has no
-              // favourites field (e.g. an older Host), so applying a decoration
-              // never makes the 常用 row jump back to the defaults.
-              favorites: Array.isArray(payload.favorites) ? payload.favorites : prev.favorites,
-            }))
+            setDecorations((prev) => {
+              const workspaces = payload.workspaces && typeof payload.workspaces === 'object' ? { ...payload.workspaces } : {}
+              const sessions = payload.sessions && typeof payload.sessions === 'object' ? { ...payload.sessions } : {}
+              const bucketName = kind === 'workspace' ? 'workspaces' : 'sessions'
+              const bucket = bucketName === 'workspaces' ? workspaces : sessions
+              const before = prev[bucketName] && prev[bucketName][id]
+              // Older Hosts delete a field that the request omits; keep it here.
+              if (before && typeof before === 'object') {
+                if (!Object.prototype.hasOwnProperty.call(patch, 'icon') && before.icon !== undefined) {
+                  bucket[id] = { ...(bucket[id] || {}), icon: before.icon }
+                }
+                if (!Object.prototype.hasOwnProperty.call(patch, 'color') && before.color !== undefined) {
+                  bucket[id] = { ...(bucket[id] || {}), color: before.color }
+                }
+              }
+              return withLocalImages({
+                workspaces,
+                sessions,
+                // Keep the current favourites when the Host response has no
+                // favourites field (e.g. an older Host), so applying a decoration
+                // never makes the 常用 row jump back to the defaults.
+                favorites: Array.isArray(payload.favorites) ? payload.favorites : prev.favorites,
+              })
+            })
           }
           return true
         } catch {
