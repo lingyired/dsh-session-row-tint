@@ -294,12 +294,13 @@ window.__ModuleLoader__.load({
         '.dsh-srt-mini{height:30px;padding:0 10px;border:1px solid rgba(0,0,0,.15);border-radius:8px;background:#fff;color:#374151;font:inherit;cursor:pointer;flex:none}',
         '.dsh-srt-mini:hover{background:#eef1f6}',
         '.dsh-srt-search{box-sizing:border-box;width:100%;height:32px;margin-bottom:10px;padding:0 10px;border:1px solid rgba(0,0,0,.15);border-radius:9px;background:#fff;color:#1d1d1f;font:inherit}',
-        '.dsh-srt-fav{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px}',
+        '.dsh-srt-fav{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px;max-height:64px;overflow:hidden}',
         '.dsh-srt-favbtn{width:30px;height:30px;flex:none}',
         '.dsh-srt-favempty{color:#9ca3af;font-size:12px;line-height:30px}',
         '.dsh-srt-icongrid{position:relative;height:196px;overflow:auto;padding:2px;margin-bottom:12px;border-radius:10px;background:rgba(0,0,0,.02)}',
         '.dsh-srt-vrow{position:absolute;left:0;right:0;display:grid;grid-template-columns:repeat(8,1fr);gap:4px}',
         '.dsh-srt-iconbtn{position:relative;display:flex;align-items:center;justify-content:center;width:100%;height:30px;padding:0;border:1px solid transparent;border-radius:8px;background:#fff;color:#374151;cursor:pointer}',
+        '.dsh-srt-fav .dsh-srt-iconbtn{width:30px;height:30px;flex:none}',
         '.dsh-srt-iconbtn.is-fav::after{content:"";position:absolute;top:3px;right:3px;width:6px;height:6px;border-radius:50%;background:#f59e0b}',
         '.dsh-srt-iconbtn:hover{background:#eef3fb;border-color:rgba(37,99,235,.35)}',
         '.dsh-srt-iconbtn.is-sel{background:#e8f0fe;border-color:#2563eb;color:#1d4ed8}',
@@ -754,7 +755,10 @@ window.__ModuleLoader__.load({
         const set = new Set(Array.isArray(decorations.favorites) ? decorations.favorites : DEFAULT_FAVORITES)
         if (set.has(value)) set.delete(value)
         else set.add(value)
-        saveFavorites([...set])
+        const next = [...set]
+        // The 常用 row is at most two rows of 8; keep the newest 16.
+        if (next.length > 16) next.splice(0, next.length - 16)
+        saveFavorites(next)
       }
 
       const applyColor = (hex) => {

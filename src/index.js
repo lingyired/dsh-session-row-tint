@@ -100,7 +100,7 @@ function cleanFavorites(input) {
       out.push(value)
     }
   }
-  return out.slice(0, 200)
+  return out.slice(0, 16)
 }
 
 /** The durable decorations store, written atomically under `dataDir`. */
