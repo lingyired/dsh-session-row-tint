@@ -49,6 +49,7 @@ window.__ModuleLoader__.load({
     const ICONS_ROUTE = '/plugins/dsh-session-row-tint/icons'
     const FAVORITES_ROUTE = '/plugins/dsh-session-row-tint/favorites'
     const FAVORITES_STORAGE_KEY = 'dsh-session-row-tint:favorites'
+    const IMAGES_STORAGE_KEY = 'dsh-session-row-tint:images'
     const SESSION_ROW_KEY = 'session:'
     const WORKSPACE_ROW_KEY = 'workspace:'
     const LUCIDE_PREFIX = 'lucide:'
@@ -163,6 +164,44 @@ window.__ModuleLoader__.load({
       } catch {
         // A blocked localStorage must not break favouriting.
       }
+    }
+
+    /** Local image icons (kind -> id -> data URL), a fallback until the Host stores them. */
+    function readLocalImages() {
+      try {
+        const raw = window.localStorage.getItem(IMAGES_STORAGE_KEY)
+        if (raw === null) return { workspaces: {}, sessions: {} }
+        const parsed = JSON.parse(raw)
+        const pick = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : {})
+        return { workspaces: pick(parsed.workspaces), sessions: pick(parsed.sessions) }
+      } catch {
+        return { workspaces: {}, sessions: {} }
+      }
+    }
+
+    function writeLocalImages(images) {
+      try {
+        window.localStorage.setItem(IMAGES_STORAGE_KEY, JSON.stringify(images))
+      } catch {
+        // A blocked localStorage must not break image icons.
+      }
+    }
+
+    /** Overlay locally-stored image icons onto decorations from the Host. */
+    function withLocalImages(decor) {
+      const images = readLocalImages()
+      const next = {
+        workspaces: { ...(decor.workspaces || {}) },
+        sessions: { ...(decor.sessions || {}) },
+        favorites: decor.favorites === undefined ? null : decor.favorites,
+      }
+      for (const kind of ['workspaces', 'sessions']) {
+        const bucket = images[kind] || {}
+        for (const id of Object.keys(bucket)) {
+          next[kind][id] = { ...(next[kind][id] || {}), icon: bucket[id] }
+        }
+      }
+      return next
     }
 
     /** Standalone SVG markup for one catalogue icon. */
@@ -345,8 +384,15 @@ window.__ModuleLoader__.load({
       return response.json()
     }
 
-    /** One icon value rendered at `size`: catalogue SVG, or an emoji/text glyph. */
+    /** One icon value rendered at `size`: catalogue SVG, uploaded image, or an emoji/text glyph. */
     function iconElement(value, size, color) {
+      if (typeof value === 'string' && value.startsWith('data:image/')) {
+        return h('img', {
+          src: value,
+          alt: '',
+          style: { width: `${size}px`, height: `${size}px`, objectFit: 'contain', display: 'block' },
+        })
+      }
       if (isCatalogValue(value)) {
         return h('span', {
           className: 'dsh-srt-svg',
@@ -370,6 +416,7 @@ window.__ModuleLoader__.load({
       const followRef = React.useRef(() => {})
       const openPickerRef = React.useRef(() => {})
       const panelRef = React.useRef(null)
+      const fileRef = React.useRef(null)
 
       // Load the icon catalogue once (retry on failure).
       React.useEffect(() => {
@@ -542,11 +589,11 @@ window.__ModuleLoader__.load({
               marks.current = marksBody.marks
             }
             if (decorBody && typeof decorBody === 'object' && !disposed) {
-              setDecorations({
+              setDecorations(withLocalImages({
                 workspaces: decorBody.workspaces && typeof decorBody.workspaces === 'object' ? decorBody.workspaces : {},
                 sessions: decorBody.sessions && typeof decorBody.sessions === 'object' ? decorBody.sessions : {},
                 favorites: Array.isArray(decorBody.favorites) ? decorBody.favorites : readLocalFavorites(),
-              })
+              }))
             }
             follow()
           } catch {
@@ -679,6 +726,7 @@ window.__ModuleLoader__.load({
           icon: current.icon || '',
           query: '',
           text: '',
+          uploadError: '',
         })
       }
 
@@ -738,7 +786,7 @@ window.__ModuleLoader__.load({
           if (!response.ok) return false
           const payload = await response.json()
           if (payload && typeof payload === 'object') {
-            setDecorations((prev) => ({
+            setDecorations((prev) => withLocalImages({
               workspaces: payload.workspaces && typeof payload.workspaces === 'object' ? payload.workspaces : {},
               sessions: payload.sessions && typeof payload.sessions === 'object' ? payload.sessions : {},
               // Keep the current favourites when the Host response has no
@@ -800,10 +848,54 @@ window.__ModuleLoader__.load({
       const applyIcon = (value) => {
         if (picker === null) return
         setPicker({ ...picker, icon: value })
+        const kindBucket = picker.kind === 'workspace' ? 'workspaces' : 'sessions'
+        const images = readLocalImages()
+        if (typeof value === 'string' && value.startsWith('data:image/')) {
+          images[kindBucket][picker.id] = value
+          writeLocalImages(images)
+          setDecorations((prev) => {
+            const bucket = { ...(prev[kindBucket] || {}) }
+            bucket[picker.id] = { ...(bucket[picker.id] || {}), icon: value }
+            return { ...prev, [kindBucket]: bucket }
+          })
+        } else if (images[kindBucket][picker.id] !== undefined) {
+          delete images[kindBucket][picker.id]
+          writeLocalImages(images)
+        }
         save(picker.kind, picker.id, { icon: value })
+      }
+      const handleFile = (event) => {
+        const file = event.target.files && event.target.files[0]
+        try { event.target.value = '' } catch {}
+        if (!file) return
+        const typeOk = /^image\/(?:svg\+xml|png|jpeg|webp)$/.test(file.type)
+        const nameOk = /\.(?:svg|png|jpe?g|webp)$/i.test(file.name)
+        if (!typeOk && !nameOk) {
+          setPicker((prev) => (prev === null ? prev : { ...prev, uploadError: '仅支持 SVG / PNG / JPG / WebP' }))
+          return
+        }
+        if (file.size > 300 * 1024) {
+          setPicker((prev) => (prev === null ? prev : { ...prev, uploadError: '图片需小于 300KB' }))
+          return
+        }
+        const reader = new FileReader()
+        reader.onload = () => {
+          if (typeof reader.result === 'string') {
+            applyIcon(reader.result)
+            setPicker((prev) => (prev === null ? prev : { ...prev, uploadError: '' }))
+          }
+        }
+        reader.onerror = () => setPicker((prev) => (prev === null ? prev : { ...prev, uploadError: '读取图片失败' }))
+        reader.readAsDataURL(file)
       }
       const clearAll = () => {
         if (picker === null) return
+        const kindBucket = picker.kind === 'workspace' ? 'workspaces' : 'sessions'
+        const images = readLocalImages()
+        if (images[kindBucket][picker.id] !== undefined) {
+          delete images[kindBucket][picker.id]
+          writeLocalImages(images)
+        }
         setPicker({ ...picker, color: '', icon: '' })
         save(picker.kind, picker.id, { color: null, icon: null })
       }
@@ -893,6 +985,26 @@ window.__ModuleLoader__.load({
               dangerouslySetInnerHTML: { __html: svgMarkup(value, 18) },
             })),
         ),
+        h('div', { className: 'dsh-srt-inline', style: { marginBottom: '8px' } },
+          h('button', {
+            className: 'dsh-srt-mini', type: 'button',
+            onClick: () => { if (fileRef.current !== null) fileRef.current.click() },
+          }, '选择图片…'),
+          typeof picker.icon === 'string' && picker.icon.startsWith('data:image/')
+            ? h('img', {
+              src: picker.icon,
+              alt: '',
+              style: { width: '24px', height: '24px', objectFit: 'contain', borderRadius: '4px', background: '#fff', border: '1px solid rgba(0,0,0,.1)' },
+            })
+            : null,
+          h('input', {
+            ref: fileRef, type: 'file', accept: '.svg,.png,.jpg,.jpeg,.webp',
+            style: { display: 'none' }, onChange: handleFile,
+          }),
+        ),
+        picker.uploadError
+          ? h('div', { className: 'dsh-srt-favempty', style: { color: '#dc2626', marginBottom: '8px' } }, picker.uploadError)
+          : null,
         h('input', {
           className: 'dsh-srt-search', type: 'search', placeholder: '搜索图标（如 rocket / 用户 / 微信 / openai）',
           value: picker.query,

@@ -40,7 +40,7 @@ function readIconsBody() {
 }
 
 /** Request bodies are tiny: an id, a colour, and a short icon string. */
-const BODY_CAP = 64 * 1024
+const BODY_CAP = 2 * 1024 * 1024
 
 /** A colour as `#rrggbb`. */
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/
@@ -59,6 +59,15 @@ function cleanIcon(value) {
   if (raw.startsWith('lucide:')) {
     const name = raw.slice('lucide:'.length)
     return /^[a-z0-9-]{1,48}$/.test(name) ? `lucide:${name}` : undefined
+  }
+  if (raw.startsWith('brand:')) {
+    const name = raw.slice('brand:'.length)
+    return /^[a-z0-9-]{1,64}$/.test(name) ? `brand:${name}` : undefined
+  }
+  // A user-uploaded image as a data URL (capped; 300 KB file ≈ 400 KB base64).
+  if (raw.startsWith('data:image/')) {
+    if (raw.length > 460000) return undefined
+    return /^data:image\/(?:svg\+xml|png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(raw) ? raw : undefined
   }
   const text = Array.from(raw).slice(0, 4).join('')
   return text === '' ? undefined : text
