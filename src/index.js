@@ -86,25 +86,48 @@ function cleanMap(input) {
   return out
 }
 
+/** A valid favourite: a catalogue icon value like `lucide:rocket` / `brand:openai`. */
+const FAVORITE_PATTERN = /^(?:lucide|brand):[a-z0-9-]{1,64}$/
+
+/** Keep well-formed, de-duplicated favourites. */
+function cleanFavorites(input) {
+  const out = []
+  const seen = new Set()
+  if (!Array.isArray(input)) return out
+  for (const value of input) {
+    if (typeof value === 'string' && FAVORITE_PATTERN.test(value) && !seen.has(value)) {
+      seen.add(value)
+      out.push(value)
+    }
+  }
+  return out.slice(0, 200)
+}
+
 /** The durable decorations store, written atomically under `dataDir`. */
 export function createStore(dataDir) {
   const file = typeof dataDir === 'string' && isAbsolute(dataDir) ? join(dataDir, 'decorations.json') : null
   const get = () => {
-    if (file === null) return { workspaces: {}, sessions: {} }
+    if (file === null) return { workspaces: {}, sessions: {}, favorites: null }
     try {
       const raw = JSON.parse(readFileSync(file, 'utf8'))
       const doc = raw === null || typeof raw !== 'object' ? {} : raw
-      return { workspaces: cleanMap(doc.workspaces), sessions: cleanMap(doc.sessions) }
+      return {
+        workspaces: cleanMap(doc.workspaces),
+        sessions: cleanMap(doc.sessions),
+        favorites: Array.isArray(doc.favorites) ? cleanFavorites(doc.favorites) : null,
+      }
     } catch {
-      return { workspaces: {}, sessions: {} }
+      return { workspaces: {}, sessions: {}, favorites: null }
     }
   }
   const set = (doc) => {
     if (file === null) return
     try {
       mkdirSync(dirname(file), { recursive: true })
+      const payload = { version: 1, workspaces: doc.workspaces || {}, sessions: doc.sessions || {} }
+      if (Array.isArray(doc.favorites)) payload.favorites = doc.favorites
       const tmp = `${file}.tmp-${process.pid}`
-      writeFileSync(tmp, JSON.stringify({ version: 1, workspaces: doc.workspaces || {}, sessions: doc.sessions || {} }, null, 2))
+      writeFileSync(tmp, JSON.stringify(payload, null, 2))
       renameSync(tmp, file)
     } catch {
       // Degrade to serving the in-memory value for this process.
@@ -197,7 +220,7 @@ export function apply(ctx, config = {}) {
           if (current.color === undefined && current.icon === undefined) delete doc[bucket][id]
           else doc[bucket][id] = current
           store.set(doc)
-          sendJson(res, 200, { workspaces: doc.workspaces, sessions: doc.sessions, storage: store.status })
+          sendJson(res, 200, { workspaces: doc.workspaces, sessions: doc.sessions, favorites: doc.favorites, storage: store.status })
         }
 
         route('/decorations', async (req, res) => {
@@ -206,7 +229,27 @@ export function apply(ctx, config = {}) {
             return
           }
           const doc = store.get()
-          sendJson(res, 200, { workspaces: doc.workspaces, sessions: doc.sessions, storage: store.status })
+          sendJson(res, 200, { workspaces: doc.workspaces, sessions: doc.sessions, favorites: doc.favorites, storage: store.status })
+        })
+        route('/favorites', async (req, res) => {
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'method not allowed' })
+            return
+          }
+          const site = String(req.headers?.['sec-fetch-site'] ?? '').toLowerCase()
+          if (site && site !== 'same-origin' && site !== 'same-site' && site !== 'none') {
+            sendJson(res, 403, { error: 'cross-site write refused' })
+            return
+          }
+          const body = await readJson(req)
+          if (!Array.isArray(body.icons)) {
+            sendJson(res, 400, { error: 'icons must be an array' })
+            return
+          }
+          const doc = store.get()
+          doc.favorites = cleanFavorites(body.icons)
+          store.set(doc)
+          sendJson(res, 200, { workspaces: doc.workspaces, sessions: doc.sessions, favorites: doc.favorites, storage: store.status })
         })
         route('/workspaces', async (req, res) => {
           if (req.method !== 'POST') {

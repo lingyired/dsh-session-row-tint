@@ -47,6 +47,7 @@ window.__ModuleLoader__.load({
     const WORKSPACES_ROUTE = '/plugins/dsh-session-row-tint/workspaces'
     const SESSIONS_ROUTE = '/plugins/dsh-session-row-tint/sessions'
     const ICONS_ROUTE = '/plugins/dsh-session-row-tint/icons'
+    const FAVORITES_ROUTE = '/plugins/dsh-session-row-tint/favorites'
     const SESSION_ROW_KEY = 'session:'
     const WORKSPACE_ROW_KEY = 'workspace:'
     const LUCIDE_PREFIX = 'lucide:'
@@ -76,6 +77,13 @@ window.__ModuleLoader__.load({
 
     /** Icon catalog fetched from the Host: value ("lucide:x" / "brand:y") -> SVG body. */
     const CATALOG = { icons: {}, keywords: {}, popular: [], ready: false }
+
+    /** Shown in the "常用" row until the user customises their favourites. */
+    const DEFAULT_FAVORITES = [
+      'lucide:star', 'lucide:heart', 'lucide:rocket', 'lucide:folder', 'lucide:file-text', 'lucide:user',
+      'lucide:settings', 'lucide:search', 'lucide:bell', 'lucide:flag', 'lucide:bookmark', 'lucide:pin',
+      'lucide:lightbulb', 'lucide:target',
+    ]
 
     function clamp(value, min, max) {
       return value < min ? min : value > max ? max : value
@@ -286,9 +294,13 @@ window.__ModuleLoader__.load({
         '.dsh-srt-mini{height:30px;padding:0 10px;border:1px solid rgba(0,0,0,.15);border-radius:8px;background:#fff;color:#374151;font:inherit;cursor:pointer;flex:none}',
         '.dsh-srt-mini:hover{background:#eef1f6}',
         '.dsh-srt-search{box-sizing:border-box;width:100%;height:32px;margin-bottom:10px;padding:0 10px;border:1px solid rgba(0,0,0,.15);border-radius:9px;background:#fff;color:#1d1d1f;font:inherit}',
+        '.dsh-srt-fav{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px}',
+        '.dsh-srt-favbtn{width:30px;height:30px;flex:none}',
+        '.dsh-srt-favempty{color:#9ca3af;font-size:12px;line-height:30px}',
         '.dsh-srt-icongrid{position:relative;height:196px;overflow:auto;padding:2px;margin-bottom:12px;border-radius:10px;background:rgba(0,0,0,.02)}',
         '.dsh-srt-vrow{position:absolute;left:0;right:0;display:grid;grid-template-columns:repeat(8,1fr);gap:4px}',
-        '.dsh-srt-iconbtn{display:flex;align-items:center;justify-content:center;width:100%;height:30px;padding:0;border:1px solid transparent;border-radius:8px;background:#fff;color:#374151;cursor:pointer}',
+        '.dsh-srt-iconbtn{position:relative;display:flex;align-items:center;justify-content:center;width:100%;height:30px;padding:0;border:1px solid transparent;border-radius:8px;background:#fff;color:#374151;cursor:pointer}',
+        '.dsh-srt-iconbtn.is-fav::after{content:"";position:absolute;top:3px;right:3px;width:6px;height:6px;border-radius:50%;background:#f59e0b}',
         '.dsh-srt-iconbtn:hover{background:#eef3fb;border-color:rgba(37,99,235,.35)}',
         '.dsh-srt-iconbtn.is-sel{background:#e8f0fe;border-color:#2563eb;color:#1d4ed8}',
         '.dsh-srt-empty{grid-column:1/-1;padding:14px;color:#9ca3af;text-align:center;font-size:12px}',
@@ -324,7 +336,7 @@ window.__ModuleLoader__.load({
     }
 
     function RowTintLayer() {
-      const [decorations, setDecorations] = React.useState({ workspaces: {}, sessions: {} })
+      const [decorations, setDecorations] = React.useState({ workspaces: {}, sessions: {}, favorites: null })
       const [picker, setPicker] = React.useState(null)
       const [layer, setLayer] = React.useState({ items: [], icons: [], clip: 'none', zIndex: 1 })
       const [catalogReady, setCatalogReady] = React.useState(false)
@@ -510,6 +522,7 @@ window.__ModuleLoader__.load({
               setDecorations({
                 workspaces: decorBody.workspaces && typeof decorBody.workspaces === 'object' ? decorBody.workspaces : {},
                 sessions: decorBody.sessions && typeof decorBody.sessions === 'object' ? decorBody.sessions : {},
+                favorites: Array.isArray(decorBody.favorites) ? decorBody.favorites : null,
               })
             }
             follow()
@@ -705,12 +718,43 @@ window.__ModuleLoader__.load({
             setDecorations({
               workspaces: payload.workspaces && typeof payload.workspaces === 'object' ? payload.workspaces : {},
               sessions: payload.sessions && typeof payload.sessions === 'object' ? payload.sessions : {},
+              favorites: Array.isArray(payload.favorites) ? payload.favorites : null,
             })
           }
           return true
         } catch {
           return false
         }
+      }
+
+      const effectiveFavorites = Array.isArray(decorations.favorites) ? decorations.favorites : DEFAULT_FAVORITES
+      const saveFavorites = async (icons) => {
+        try {
+          const response = await fetch(FAVORITES_ROUTE, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json', accept: 'application/json' },
+            body: JSON.stringify({ icons }),
+          })
+          if (!response.ok) return false
+          const payload = await response.json()
+          if (payload && typeof payload === 'object') {
+            setDecorations({
+              workspaces: payload.workspaces && typeof payload.workspaces === 'object' ? payload.workspaces : {},
+              sessions: payload.sessions && typeof payload.sessions === 'object' ? payload.sessions : {},
+              favorites: Array.isArray(payload.favorites) ? payload.favorites : null,
+            })
+          }
+          return true
+        } catch {
+          return false
+        }
+      }
+      const toggleFavorite = (value) => {
+        const set = new Set(Array.isArray(decorations.favorites) ? decorations.favorites : DEFAULT_FAVORITES)
+        if (set.has(value)) set.delete(value)
+        else set.add(value)
+        saveFavorites([...set])
       }
 
       const applyColor = (hex) => {
@@ -759,6 +803,7 @@ window.__ModuleLoader__.load({
       }, [...rows, ...iconEls])
 
       const iconResults = picker === null ? [] : searchIcons(picker.query)
+      const favoriteSet = new Set(effectiveFavorites)
       const totalRows = Math.ceil(iconResults.length / GRID_COLUMNS)
       const scrollTop = Math.min(gridScroll, Math.max(0, (totalRows - 1) * GRID_ROW))
       const startRow = Math.max(0, Math.min(totalRows, Math.floor(scrollTop / GRID_ROW) - GRID_OVERSCAN))
@@ -770,6 +815,7 @@ window.__ModuleLoader__.load({
         'aria-label': picker.kind === 'workspace' ? '工作区颜色 / 图标' : '会话颜色 / 图标',
         style: { left: `${picker.x}px`, top: `${picker.y}px` },
         onPointerDown: (event) => event.stopPropagation(),
+        onContextMenu: (event) => event.preventDefault(),
       },
         h('div', { className: 'dsh-srt-head' },
           h('b', null, picker.kind === 'workspace' ? '工作区颜色 / 图标' : '会话颜色 / 图标'),
@@ -797,6 +843,20 @@ window.__ModuleLoader__.load({
           h('button', { className: 'dsh-srt-mini', type: 'button', onClick: () => applyColor('') }, '清除颜色'),
         ),
         h('span', { className: 'dsh-srt-label' }, '图标'),
+        h('div', { className: 'dsh-srt-fav' },
+          effectiveFavorites.length === 0
+            ? h('span', { className: 'dsh-srt-favempty' }, '右键下方图标可收藏到常用')
+            : effectiveFavorites.map((value) => h('button', {
+              key: `fav:${value}`,
+              type: 'button',
+              className: `dsh-srt-iconbtn dsh-srt-favbtn${picker.icon === value ? ' is-sel' : ''}`,
+              title: `${iconName(value)}（右键取消收藏）`,
+              'aria-label': `使用常用图标 ${iconName(value)}`,
+              onClick: () => applyIcon(value),
+              onContextMenu: (event) => { event.preventDefault(); event.stopPropagation(); toggleFavorite(value) },
+              dangerouslySetInnerHTML: { __html: svgMarkup(value, 18) },
+            })),
+        ),
         h('input', {
           className: 'dsh-srt-search', type: 'search', placeholder: '搜索图标（如 rocket / 用户 / 微信 / openai）',
           value: picker.query,
@@ -822,10 +882,11 @@ window.__ModuleLoader__.load({
                     buttons.push(h('button', {
                       key: value,
                       type: 'button',
-                      className: `dsh-srt-iconbtn${picker.icon === value ? ' is-sel' : ''}`,
-                      title: iconName(value),
+                      className: `dsh-srt-iconbtn${picker.icon === value ? ' is-sel' : ''}${favoriteSet.has(value) ? ' is-fav' : ''}`,
+                      title: `${iconName(value)}（右键收藏 / 取消）`,
                       'aria-label': `使用图标 ${iconName(value)}`,
                       onClick: () => applyIcon(value),
+                      onContextMenu: (event) => { event.preventDefault(); event.stopPropagation(); toggleFavorite(value) },
                       dangerouslySetInnerHTML: { __html: svgMarkup(value, 18) },
                     }))
                   }
