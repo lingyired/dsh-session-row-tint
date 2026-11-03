@@ -738,11 +738,14 @@ window.__ModuleLoader__.load({
           if (!response.ok) return false
           const payload = await response.json()
           if (payload && typeof payload === 'object') {
-            setDecorations({
+            setDecorations((prev) => ({
               workspaces: payload.workspaces && typeof payload.workspaces === 'object' ? payload.workspaces : {},
               sessions: payload.sessions && typeof payload.sessions === 'object' ? payload.sessions : {},
-              favorites: Array.isArray(payload.favorites) ? payload.favorites : null,
-            })
+              // Keep the current favourites when the Host response has no
+              // favourites field (e.g. an older Host), so applying a decoration
+              // never makes the 常用 row jump back to the defaults.
+              favorites: Array.isArray(payload.favorites) ? payload.favorites : prev.favorites,
+            }))
           }
           return true
         } catch {
