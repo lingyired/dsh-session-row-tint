@@ -124,9 +124,10 @@ export function createStore(dataDir) {
         workspaces: cleanMap(doc.workspaces),
         sessions: cleanMap(doc.sessions),
         favorites: Array.isArray(doc.favorites) ? cleanFavorites(doc.favorites) : null,
+        settings: cleanSettings(doc.settings),
       }
     } catch {
-      return { workspaces: {}, sessions: {}, favorites: null }
+      return { workspaces: {}, sessions: {}, favorites: null, settings: undefined }
     }
   }
   const set = (doc) => {
@@ -135,6 +136,7 @@ export function createStore(dataDir) {
       mkdirSync(dirname(file), { recursive: true })
       const payload = { version: 1, workspaces: doc.workspaces || {}, sessions: doc.sessions || {} }
       if (Array.isArray(doc.favorites)) payload.favorites = doc.favorites
+      if (doc.settings !== undefined && doc.settings !== null) payload.settings = doc.settings
       const tmp = `${file}.tmp-${process.pid}`
       writeFileSync(tmp, JSON.stringify(payload, null, 2))
       renameSync(tmp, file)
@@ -179,6 +181,24 @@ function resolveSettings(config) {
     sessionIconSize: numberSetting(c.sessionIconSize, 14, 8, 40),
     workspaceFontSize: numberSetting(c.workspaceFontSize, 15, 9, 28),
   }
+}
+
+/** Bounds for the graphical settings, shared with the client. */
+const SETTINGS_BOUNDS = {
+  workspaceIconSize: [10, 48],
+  sessionIconSize: [8, 40],
+  workspaceFontSize: [9, 28],
+}
+
+/** Keep only known numeric size settings, clamped to their bounds. */
+function cleanSettings(input) {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return undefined
+  const out = {}
+  for (const [key, range] of Object.entries(SETTINGS_BOUNDS)) {
+    const value = Number(input[key])
+    if (Number.isFinite(value)) out[key] = Math.min(range[1], Math.max(range[0], Math.round(value)))
+  }
+  return Object.keys(out).length === 0 ? undefined : out
 }
 
 /** Register the durable store and its routes when the web server is composed. */
@@ -253,7 +273,7 @@ export function apply(ctx, config = {}) {
           if (current.color === undefined && current.icon === undefined) delete doc[bucket][id]
           else doc[bucket][id] = current
           store.set(doc)
-          sendJson(res, 200, { workspaces: doc.workspaces, sessions: doc.sessions, favorites: doc.favorites, storage: store.status })
+          sendJson(res, 200, { workspaces: doc.workspaces, sessions: doc.sessions, favorites: doc.favorites, settings: doc.settings, storage: store.status })
         }
 
         route('/decorations', async (req, res) => {
@@ -262,7 +282,7 @@ export function apply(ctx, config = {}) {
             return
           }
           const doc = store.get()
-          sendJson(res, 200, { workspaces: doc.workspaces, sessions: doc.sessions, favorites: doc.favorites, storage: store.status })
+          sendJson(res, 200, { workspaces: doc.workspaces, sessions: doc.sessions, favorites: doc.favorites, settings: doc.settings, storage: store.status })
         })
         route('/favorites', async (req, res) => {
           if (req.method !== 'POST') {
@@ -282,7 +302,28 @@ export function apply(ctx, config = {}) {
           const doc = store.get()
           doc.favorites = cleanFavorites(body.icons)
           store.set(doc)
-          sendJson(res, 200, { workspaces: doc.workspaces, sessions: doc.sessions, favorites: doc.favorites, storage: store.status })
+          sendJson(res, 200, { workspaces: doc.workspaces, sessions: doc.sessions, favorites: doc.favorites, settings: doc.settings, storage: store.status })
+        })
+        route('/settings', async (req, res) => {
+          if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'method not allowed' })
+            return
+          }
+          const site = String(req.headers?.['sec-fetch-site'] ?? '').toLowerCase()
+          if (site && site !== 'same-origin' && site !== 'same-site' && site !== 'none') {
+            sendJson(res, 403, { error: 'cross-site write refused' })
+            return
+          }
+          const body = await readJson(req)
+          const patched = cleanSettings(body)
+          if (patched === undefined) {
+            sendJson(res, 400, { error: 'no valid settings' })
+            return
+          }
+          const doc = store.get()
+          doc.settings = { ...(doc.settings || {}), ...patched }
+          store.set(doc)
+          sendJson(res, 200, { workspaces: doc.workspaces, sessions: doc.sessions, favorites: doc.favorites, settings: doc.settings, storage: store.status })
         })
         route('/workspaces', async (req, res) => {
           if (req.method !== 'POST') {
@@ -303,7 +344,7 @@ export function apply(ctx, config = {}) {
             sendJson(res, 405, { error: 'method not allowed' })
             return
           }
-          sendJson(res, 200, settings)
+          sendJson(res, 200, { ...settings, ...(store.get().settings || {}) })
         })
         route('/icons', async (req, res) => {
           if (req.method !== 'GET') {

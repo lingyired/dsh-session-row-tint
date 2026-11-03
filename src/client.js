@@ -87,8 +87,15 @@ window.__ModuleLoader__.load({
     const FAVORITES_STORAGE_KEY = 'dsh-session-row-tint:favorites'
     const IMAGES_STORAGE_KEY = 'dsh-session-row-tint:images'
     const CONFIG_ROUTE = '/plugins/dsh-session-row-tint/config'
+    const SETTINGS_ROUTE = '/plugins/dsh-session-row-tint/settings'
+    const SETTINGS_STORAGE_KEY = 'dsh-session-row-tint:settings'
     /** Live sizes from the Host config; overwritten once /config answers. */
     const SETTINGS = { workspaceIconSize: 22, sessionIconSize: 14, workspaceFontSize: 15 }
+    const SETTINGS_BOUNDS = {
+      workspaceIconSize: [10, 48],
+      sessionIconSize: [8, 40],
+      workspaceFontSize: [9, 28],
+    }
     const SESSION_ROW_KEY = 'session:'
     const WORKSPACE_ROW_KEY = 'workspace:'
     const LUCIDE_PREFIX = 'lucide:'
@@ -241,6 +248,46 @@ window.__ModuleLoader__.load({
         }
       }
       return next
+    }
+
+    function readLocalSettings() {
+      try {
+        const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
+        if (raw === null) return null
+        return JSON.parse(raw)
+      } catch {
+        return null
+      }
+    }
+
+    function writeLocalSettings() {
+      try {
+        const out = {}
+        for (const key of Object.keys(SETTINGS)) out[key] = SETTINGS[key]
+        window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(out))
+      } catch {
+        // A blocked localStorage must not break the settings.
+      }
+    }
+
+    /** Apply known numeric settings (clamped), persist locally and repaint. */
+    function applySettings(patch, persist = true) {
+      if (patch === null || typeof patch !== 'object') return false
+      let changed = false
+      for (const [key, range] of Object.entries(SETTINGS_BOUNDS)) {
+        const value = Number(patch[key])
+        if (!Number.isFinite(value)) continue
+        const next = Math.min(range[1], Math.max(range[0], Math.round(value)))
+        if (SETTINGS[key] !== next) {
+          SETTINGS[key] = next
+          changed = true
+        }
+      }
+      if (changed) {
+        if (persist) writeLocalSettings()
+        decorSet({ ...decorGet() })
+      }
+      return changed
     }
 
     /** Standalone SVG markup for one catalogue icon. */
@@ -510,6 +557,12 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
+      // Local settings first (works before the Host route exists).
+      React.useEffect(() => {
+        const local = readLocalSettings()
+        if (local !== null) applySettings(local, false)
+      }, [])
+
       // Load size options from the Host config once (retry on failure).
       React.useEffect(() => {
         let cancelled = false
@@ -520,9 +573,7 @@ window.__ModuleLoader__.load({
             if (!response.ok) throw new Error(`config route ${response.status}`)
             const body = await response.json()
             if (cancelled || body === null || typeof body !== 'object') return
-            for (const key of Object.keys(SETTINGS)) {
-              if (typeof body[key] === 'number' && Number.isFinite(body[key])) SETTINGS[key] = body[key]
-            }
+            applySettings(body, false)
             setSettingsVersion((value) => value + 1)
             // Slot components read SETTINGS directly; nudge them to re-render.
             decorSet({ ...decorGet() })
@@ -691,6 +742,7 @@ window.__ModuleLoader__.load({
                 sessions: decorBody.sessions && typeof decorBody.sessions === 'object' ? decorBody.sessions : {},
                 favorites: Array.isArray(decorBody.favorites) ? decorBody.favorites : readLocalFavorites(),
               }))
+              if (decorBody.settings !== undefined && decorBody.settings !== null) applySettings(decorBody.settings)
             }
             follow()
           } catch {
@@ -839,6 +891,7 @@ window.__ModuleLoader__.load({
           query: '',
           text: '',
           uploadError: '',
+          showSettings: false,
         })
       }
       PICKER_REQUEST.current = (kind, id) => {
@@ -971,6 +1024,23 @@ window.__ModuleLoader__.load({
         // The 常用 row is at most two rows of 8; keep the newest 16.
         if (next.length > 16) next.splice(0, next.length - 16)
         saveFavorites(next)
+      }
+      const saveSettings = async (patch) => {
+        applySettings(patch)
+        try {
+          const response = await fetch(SETTINGS_ROUTE, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'content-type': 'application/json', accept: 'application/json' },
+            body: JSON.stringify(patch),
+          })
+          if (!response.ok) return false
+          const payload = await response.json()
+          if (payload && typeof payload.settings === 'object') applySettings(payload.settings, false)
+          return true
+        } catch {
+          return false
+        }
       }
 
       const applyColor = (hex) => {
@@ -1124,6 +1194,28 @@ window.__ModuleLoader__.load({
       const scrollTop = Math.min(gridScroll, Math.max(0, (totalRows - 1) * GRID_ROW))
       const startRow = Math.max(0, Math.min(totalRows, Math.floor(scrollTop / GRID_ROW) - GRID_OVERSCAN))
       const endRow = Math.max(startRow, Math.min(totalRows, Math.ceil((scrollTop + GRID_VIEW) / GRID_ROW) + GRID_OVERSCAN))
+      const writeSize = (key, raw) => {
+        const value = Number(raw)
+        if (!Number.isFinite(value)) return
+        const [min, max] = SETTINGS_BOUNDS[key]
+        const next = Math.min(max, Math.max(min, Math.round(value)))
+        if (SETTINGS[key] !== next) {
+          SETTINGS[key] = next
+          writeLocalSettings()
+          decorSet({ ...decorGet() })
+        }
+        saveSettings({ [key]: next })
+      }
+      const sizeRow = (key, label) => h('div', { className: 'dsh-srt-set-row' },
+        h('label', { className: 'dsh-srt-set-label' }, label),
+        h('input', {
+          className: 'dsh-srt-set-range', type: 'range', step: 1,
+          min: SETTINGS_BOUNDS[key][0], max: SETTINGS_BOUNDS[key][1],
+          value: SETTINGS[key], 'aria-label': label,
+          onChange: (event) => writeSize(key, event.target.value),
+        }),
+        h('span', { className: 'dsh-srt-set-value' }, `${SETTINGS[key]}px`),
+      )
       const panel = picker === null ? null : h('div', {
         className: 'dsh-srt-panel',
         ref: panelRef,
@@ -1135,8 +1227,21 @@ window.__ModuleLoader__.load({
       },
         h('div', { className: 'dsh-srt-head' },
           h('b', null, picker.kind === 'workspace' ? '工作区颜色 / 图标' : '会话颜色 / 图标'),
+          h('button', {
+            className: 'dsh-srt-close', type: 'button',
+            'aria-label': '尺寸设置', title: '尺寸设置',
+            onClick: () => setPicker({ ...picker, showSettings: !picker.showSettings }),
+          }, '⚙'),
           h('button', { className: 'dsh-srt-close', type: 'button', 'aria-label': '关闭', onClick: () => setPicker(null) }, '×'),
         ),
+        picker.showSettings ? [
+          h('span', { className: 'dsh-srt-label' }, '尺寸设置'),
+          h('div', { className: 'dsh-srt-settings' },
+            sizeRow('workspaceIconSize', '工作区图标大小'),
+            sizeRow('sessionIconSize', '会话图标大小'),
+            sizeRow('workspaceFontSize', '工作区标题字号'),
+          ),
+        ] : null,
         h('span', { className: 'dsh-srt-label' }, '颜色'),
         h('div', { className: 'dsh-srt-swatches' },
           PRESET_COLORS.map((hex) => h('button', {
