@@ -50,6 +50,9 @@ window.__ModuleLoader__.load({
     const FAVORITES_ROUTE = '/plugins/dsh-session-row-tint/favorites'
     const FAVORITES_STORAGE_KEY = 'dsh-session-row-tint:favorites'
     const IMAGES_STORAGE_KEY = 'dsh-session-row-tint:images'
+    const CONFIG_ROUTE = '/plugins/dsh-session-row-tint/config'
+    /** Live sizes from the Host config; overwritten once /config answers. */
+    const SETTINGS = { workspaceIconSize: 22, sessionIconSize: 14, workspaceFontSize: 15 }
     const SESSION_ROW_KEY = 'session:'
     const WORKSPACE_ROW_KEY = 'workspace:'
     const LUCIDE_PREFIX = 'lucide:'
@@ -409,6 +412,7 @@ window.__ModuleLoader__.load({
       const [picker, setPicker] = React.useState(null)
       const [layer, setLayer] = React.useState({ items: [], icons: [], clip: 'none', zIndex: 1 })
       const [catalogReady, setCatalogReady] = React.useState(false)
+      const [settingsVersion, setSettingsVersion] = React.useState(0)
       const [gridScroll, setGridScroll] = React.useState(0)
       const gridRef = React.useRef(null)
       const decorationsRef = React.useRef(decorations)
@@ -445,6 +449,31 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
+      // Load size options from the Host config once (retry on failure).
+      React.useEffect(() => {
+        let cancelled = false
+        let timer
+        const load = async () => {
+          try {
+            const response = await fetch(CONFIG_ROUTE, { credentials: 'same-origin', headers: { accept: 'application/json' } })
+            if (!response.ok) throw new Error(`config route ${response.status}`)
+            const body = await response.json()
+            if (cancelled || body === null || typeof body !== 'object') return
+            for (const key of Object.keys(SETTINGS)) {
+              if (typeof body[key] === 'number' && Number.isFinite(body[key])) SETTINGS[key] = body[key]
+            }
+            setSettingsVersion((value) => value + 1)
+          } catch {
+            if (!cancelled) timer = setTimeout(load, 3000)
+          }
+        }
+        load()
+        return () => {
+          cancelled = true
+          if (timer !== undefined) clearTimeout(timer)
+        }
+      }, [])
+
       // Measuring + polling.
       React.useEffect(() => {
         let disposed = false
@@ -453,6 +482,7 @@ window.__ModuleLoader__.load({
         const marks = { current: {} }
         const hiddenSvgs = new Set()
         const coloredTitles = new Set()
+        const sizedWorkspaceTitles = new Set()
 
         const compute = () => {
           const sessions = sessionRows()
@@ -468,10 +498,17 @@ window.__ModuleLoader__.load({
           const icons = []
           const seen = new Set()
           const seenTitles = new Set()
+          const seenWsTitles = new Set()
 
           for (let i = 0; i < workspaces.length; i += 1) {
             const row = workspaces[i]
             const wid = workspaceIdOf(row)
+            const wsTitle = row.querySelector('span[class*="_projectText"]')
+            if (wsTitle !== null) {
+              wsTitle.style.fontSize = `${SETTINGS.workspaceFontSize}px`
+              sizedWorkspaceTitles.add(wsTitle)
+              seenWsTitles.add(wsTitle)
+            }
             const decoration = wid === undefined ? undefined : wdecor[wid]
             if (decoration !== undefined && decoration.icon !== undefined) {
               const svg = row.querySelector('span[class*="_folder"] svg') || row.querySelector('svg')
@@ -482,7 +519,7 @@ window.__ModuleLoader__.load({
                 try {
                   const iconBox = (row.querySelector('span[class*="_folder"]') || svg).getBoundingClientRect()
                   if (iconBox.width > 0 && iconBox.height > 0) {
-                    icons.push({ key: `wi:${wid}`, left: iconBox.left, top: iconBox.top, width: iconBox.width, height: iconBox.height, value: decoration.icon, color: decoration.color })
+                    icons.push({ key: `wi:${wid}`, kind: 'workspace', left: iconBox.left, top: iconBox.top, width: iconBox.width, height: iconBox.height, value: decoration.icon, color: decoration.color })
                   }
                 } catch {
                   // No icon geometry this frame.
@@ -541,7 +578,7 @@ window.__ModuleLoader__.load({
                 try {
                   const iconBox = slot.getBoundingClientRect()
                   if (iconBox.width > 0 && iconBox.height > 0) {
-                    icons.push({ key: `si:${id}`, left: iconBox.left, top: iconBox.top, width: iconBox.width, height: iconBox.height, value: sdec.icon, color: sdec.color })
+                    icons.push({ key: `si:${id}`, kind: 'session', left: iconBox.left, top: iconBox.top, width: iconBox.width, height: iconBox.height, value: sdec.icon, color: sdec.color })
                   }
                 } catch {
                   // No icon geometry this frame.
@@ -559,6 +596,11 @@ window.__ModuleLoader__.load({
             if (seenTitles.has(el)) continue
             try { el.style.color = '' } catch {}
             coloredTitles.delete(el)
+          }
+          for (const el of Array.from(sizedWorkspaceTitles)) {
+            if (seenWsTitles.has(el)) continue
+            try { el.style.fontSize = '' } catch {}
+            sizedWorkspaceTitles.delete(el)
           }
 
           if (disposed) return
@@ -635,6 +677,10 @@ window.__ModuleLoader__.load({
             try { el.style.color = '' } catch {}
           }
           coloredTitles.clear()
+          for (const el of sizedWorkspaceTitles) {
+            try { el.style.fontSize = '' } catch {}
+          }
+          sizedWorkspaceTitles.clear()
           followRef.current = () => {}
         }
       }, [])
@@ -764,7 +810,7 @@ window.__ModuleLoader__.load({
         }
       }, [picker])
 
-      React.useEffect(() => { followRef.current() }, [decorations, catalogReady])
+      React.useEffect(() => { followRef.current() }, [decorations, catalogReady, settingsVersion])
 
       // Reset the icon grid scroll to the top when the target or query changes.
       const gridResetKey = picker === null ? '' : `${picker.kind}:${picker.id}:${picker.query}`
@@ -914,12 +960,15 @@ window.__ModuleLoader__.load({
         },
       }))
       const iconEls = layer.icons.map((icon) => {
-        const node = iconElement(icon.value, Math.min(18, Math.max(12, Math.round(icon.height) || 16)), icon.color)
+        const size = icon.kind === 'workspace' ? SETTINGS.workspaceIconSize : SETTINGS.sessionIconSize
+        const node = iconElement(icon.value, size, icon.color)
         if (node === null) return null
+        const left = icon.left + (icon.width - size) / 2
+        const top = icon.top + (icon.height - size) / 2
         return h('span', {
           key: icon.key,
           className: 'dsh-srt-icon',
-          style: { left: `${icon.left}px`, top: `${icon.top}px`, width: `${icon.width}px`, height: `${icon.height}px` },
+          style: { left: `${left}px`, top: `${top}px`, width: `${size}px`, height: `${size}px` },
         }, node)
       })
 

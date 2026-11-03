@@ -57,7 +57,13 @@
      name: dsh-session-row-tint
      config:
        dataDir: /absolute/path/to/profiles/<profile>/data/dsh-session-row-tint
+       # 可选尺寸（px），不写用默认值
+       workspaceIconSize: 24   # 工作区图标（默认 22）
+       sessionIconSize: 14     # 会话图标（默认 14）
+       workspaceFontSize: 16   # 工作区标题字号（默认 15）
    ```
+
+   尺寸选项：`workspaceIconSize`(10–48)、`sessionIconSize`(8–40)、`workspaceFontSize`(9–28)。
 
 3. 在该 profile 目录执行 `pnpm install`。
 

@@ -165,11 +165,28 @@ async function readJson(req, limit = BODY_CAP) {
   }
 }
 
+/** Read a numeric option with a default and bounds. */
+function numberSetting(value, fallback, min, max) {
+  const n = Number(value)
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback
+}
+
+/** Sizes the browser half uses, changeable from the profile config. */
+function resolveSettings(config) {
+  const c = config === null || config === undefined || typeof config !== 'object' ? {} : config
+  return {
+    workspaceIconSize: numberSetting(c.workspaceIconSize, 22, 10, 48),
+    sessionIconSize: numberSetting(c.sessionIconSize, 14, 8, 40),
+    workspaceFontSize: numberSetting(c.workspaceFontSize, 15, 9, 28),
+  }
+}
+
 /** Register the durable store and its routes when the web server is composed. */
 export function apply(ctx, config = {}) {
   try {
     if (ctx === undefined || ctx === null || typeof ctx.inject !== 'function') return
     const store = createStore(config === null || config === undefined ? undefined : config.dataDir)
+    const settings = resolveSettings(config)
     ctx.inject(['webServer', 'connection'], (hostCtx) => {
       try {
         const webServer = hostCtx === undefined || hostCtx === null ? undefined : hostCtx.webServer
@@ -273,6 +290,13 @@ export function apply(ctx, config = {}) {
             return
           }
           await write(req, res, 'sessions', 'sessionId')
+        })
+        route('/config', async (req, res) => {
+          if (req.method !== 'GET') {
+            sendJson(res, 405, { error: 'method not allowed' })
+            return
+          }
+          sendJson(res, 200, settings)
         })
         route('/icons', async (req, res) => {
           if (req.method !== 'GET') {
