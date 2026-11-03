@@ -275,6 +275,16 @@ window.__ModuleLoader__.load({
     function sessionIdOf(node) { return idFromKey(node, SESSION_ROW_KEY) }
     function workspaceIdOf(node) { return idFromKey(node, WORKSPACE_ROW_KEY) }
 
+    /** True when the row's leading slot currently renders a status glyph. */
+    function slotHasStatus(slot) {
+      if (slot === null) return false
+      if ((slot.textContent || '').trim() !== '') return true
+      for (const el of slot.querySelectorAll('*')) {
+        if (el.getAttribute('data-slot') === null) return true
+      }
+      return false
+    }
+
     function scrollContainerOf(node) {
       try {
         let current = node === null || node === undefined ? null : node.parentElement
@@ -483,7 +493,6 @@ window.__ModuleLoader__.load({
         const hiddenSvgs = new Set()
         const coloredTitles = new Set()
         const sizedWorkspaceTitles = new Set()
-        const paddedSessionTitles = new Set()
 
         const compute = () => {
           const sessions = sessionRows()
@@ -500,7 +509,6 @@ window.__ModuleLoader__.load({
           const seen = new Set()
           const seenTitles = new Set()
           const seenWsTitles = new Set()
-          const seenPaddedTitles = new Set()
 
           for (let i = 0; i < workspaces.length; i += 1) {
             const row = workspaces[i]
@@ -556,6 +564,8 @@ window.__ModuleLoader__.load({
           for (const row of sessions) {
             const id = sessionIdOf(row)
             if (id === undefined) continue
+            const rowTitle = row.querySelector('span[class*="_title"]')
+            if (rowTitle !== null && rowTitle.style.marginLeft !== '') rowTitle.style.marginLeft = ''
             const sdec = sdecor[id]
             let textColor
             if (sdec !== undefined && sdec.color !== undefined) textColor = sdec.color
@@ -570,30 +580,24 @@ window.__ModuleLoader__.load({
             }
             if (sdec !== undefined && sdec.icon !== undefined) {
               const slot = row.querySelector('span[class*="_slot"]')
-              if (slot !== null) {
+              // The custom icon lives in the status slot; when the slot has a
+              // real status glyph (spinner, dot from another plugin, ...), that
+              // glyph wins and the custom icon is not drawn at all.
+              if (slot !== null && !slotHasStatus(slot)) {
                 try {
                   const slotBox = slot.getBoundingClientRect()
                   if (slotBox.height > 0) {
                     const size = SETTINGS.sessionIconSize
-                    // Keep the status dot / loading spinner visible: draw the
-                    // custom icon beside it and make room by shifting the title
-                    // rather than covering the status glyph.
                     icons.push({
                       key: `si:${id}`,
                       kind: 'session',
-                      left: slotBox.right + 2,
+                      left: slotBox.left + (slotBox.width - size) / 2,
                       top: slotBox.top + (slotBox.height - size) / 2,
                       width: size,
                       height: size,
                       value: sdec.icon,
                       color: sdec.color,
                     })
-                    const titleEl = row.querySelector('span[class*="_title"]')
-                    if (titleEl !== null) {
-                      titleEl.style.marginLeft = `${size + 2}px`
-                      paddedSessionTitles.add(titleEl)
-                      seenPaddedTitles.add(titleEl)
-                    }
                   }
                 } catch {
                   // No icon geometry this frame.
@@ -616,11 +620,6 @@ window.__ModuleLoader__.load({
             if (seenWsTitles.has(el)) continue
             try { el.style.fontSize = '' } catch {}
             sizedWorkspaceTitles.delete(el)
-          }
-          for (const el of Array.from(paddedSessionTitles)) {
-            if (seenPaddedTitles.has(el)) continue
-            try { el.style.marginLeft = '' } catch {}
-            paddedSessionTitles.delete(el)
           }
 
           if (disposed) return
@@ -701,10 +700,6 @@ window.__ModuleLoader__.load({
             try { el.style.fontSize = '' } catch {}
           }
           sizedWorkspaceTitles.clear()
-          for (const el of paddedSessionTitles) {
-            try { el.style.marginLeft = '' } catch {}
-          }
-          paddedSessionTitles.clear()
           followRef.current = () => {}
         }
       }, [])
