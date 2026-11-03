@@ -93,10 +93,12 @@
 
 ## 实现要点
 
-- 纯浏览器渲染，完全不改 DSH 自带文件：
-  - 注册进 `shell.overlay` 槽位，画在一块**点击穿透**的浮层上；面板是独立 portal。
-  - 通过 `[data-row-key="workspace:<id>"]` / `[data-row-key="session:<id>"]`、`role="treeitem"` 定位行。
-  - 会话图标画在左侧 `span.JoiKIa_slot` 位置并隐藏原状态图形；工区图标画在文件夹图标位置。
+- 优先用 DSH 官方 slot，slot 覆盖不到的地方才做 DOM：
+  - `sidebar.workspaces.session.menu.item`：会话行「...」菜单里的「颜色 / 图标」入口；
+  - `sidebar.session.row.leading`：会话的自定义图标（有 loading 转圈/状态文本时自动让位，不遮挡状态）；
+  - `shell.overlay`：**点击穿透**浮层，用来画没有对应 slot 的东西——工作区整块淡色底、工作区文件夹图标；
+  - 工作区行的「...」菜单没有官方 slot，用 DOM 注入补一项；
+  - 面板是独立 portal；样式统一走注入的 `<style>` + 行内 CSS 变量/颜色。
 - 为避免与源插件重复绘制，会隐藏源插件的细色条 `.dsh-sc-chip`。
 
 ## 兼容性
