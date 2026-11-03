@@ -552,13 +552,18 @@ window.__ModuleLoader__.load({
               bottom = box.bottom
             }
             if (!(bottom > box.top)) bottom = box.bottom
-            if (bounds !== null && (box.bottom <= bounds.top || box.top >= bounds.bottom)) continue
+            // Clip the block to the visible part of the sidebar instead of
+            // skipping it: when the workspace header row scrolls out of view its
+            // session rows (and their tint) must still keep the colour.
+            const top = bounds === null ? box.top : Math.max(box.top, bounds.top)
+            const limit = bounds === null ? bottom : Math.min(bottom, bounds.bottom)
+            if (!(limit > top)) continue
             items.push({
               key: `w:${wid}`,
               left: box.left + 2,
-              top: box.top + 1,
+              top: top + 1,
               width: Math.max(0, box.width - 4),
-              height: Math.max(20, bottom - box.top - 1),
+              height: Math.max(1, limit - top - 1),
               background: hexToRgba(decoration.color, WORKSPACE_TINT_ALPHA),
               accent: hexToRgba(decoration.color, 0.55),
               radius: 10,
@@ -999,7 +1004,9 @@ window.__ModuleLoader__.load({
       syncRef.current = () => {
         const workspaces = workspaceRows()
         const container = workspaces.length > 0 ? scrollContainerOf(workspaces[0]) : null
-        const containerBottom = container === null ? null : container.getBoundingClientRect().bottom
+        const containerBox = container === null ? null : container.getBoundingClientRect()
+        const boundsTop = containerBox === null ? 0 : containerBox.top
+        const boundsBottom = containerBox === null ? window.innerHeight : Math.min(containerBox.bottom, window.innerHeight)
         for (const [key, node] of itemRefs.current) {
           if (!key.startsWith('w:')) continue
           const row = document.querySelector(`[data-row-key="${WORKSPACE_ROW_KEY}${key.slice(2)}"]`)
@@ -1008,12 +1015,14 @@ window.__ModuleLoader__.load({
           let bottom = box.bottom
           const index = workspaces.indexOf(row)
           if (index >= 0 && index + 1 < workspaces.length) bottom = workspaces[index + 1].getBoundingClientRect().top - 2
-          else if (containerBottom !== null) bottom = Math.min(containerBottom, window.innerHeight) - 2
+          else bottom = boundsBottom - 2
           if (!(bottom > box.top)) bottom = box.bottom
+          const top = Math.max(box.top, boundsTop)
+          const limit = Math.min(bottom, boundsBottom)
           node.style.left = `${box.left + 2}px`
-          node.style.top = `${box.top + 1}px`
+          node.style.top = `${top + 1}px`
           node.style.width = `${Math.max(0, box.width - 4)}px`
-          node.style.height = `${Math.max(20, bottom - box.top - 1)}px`
+          node.style.height = `${Math.max(0, limit - top - 1)}px`
         }
         for (const [key, node] of iconRefs.current) {
           const kind = key.startsWith('wi:') ? 'workspace' : 'session'
