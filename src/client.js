@@ -41,6 +41,42 @@ window.__ModuleLoader__.load({
       createPortal = undefined
     }
 
+    // DSH primitives (menu item) may or may not be exposed; use it when available.
+    let MenuItemButton
+    try {
+      const primitives = require('@deepseek-ai/dsh-client-ui-primitives')
+      MenuItemButton = primitives && primitives.MenuItemButton
+    } catch {
+      MenuItemButton = undefined
+    }
+
+    // One shared decorations store, so the overlay layer and the slot components
+    // (session row menu / leading icon) all read the same state.
+    const DECOR_STORE = { value: { workspaces: {}, sessions: {}, favorites: null }, listeners: new Set() }
+    function decorGet() {
+      return DECOR_STORE.value
+    }
+    function decorSet(next) {
+      DECOR_STORE.value = next
+      for (const listener of DECOR_STORE.listeners) {
+        try { listener() } catch {}
+      }
+    }
+    function decorSubscribe(listener) {
+      DECOR_STORE.listeners.add(listener)
+      return () => DECOR_STORE.listeners.delete(listener)
+    }
+    function useDecorations() {
+      return React.useSyncExternalStore(decorSubscribe, decorGet, decorGet)
+    }
+    /** Set by the overlay layer: opens the picker for a kind/id from a slot click. */
+    const PICKER_REQUEST = { current: null }
+    function requestPicker(kind, id) {
+      try {
+        if (PICKER_REQUEST.current !== null) PICKER_REQUEST.current(kind, id)
+      } catch {}
+    }
+
     const h = React.createElement
     const MARKS_ROUTE = '/plugins/dsh-session-colors/marks'
     const DECORATIONS_ROUTE = '/plugins/dsh-session-row-tint/decorations'
@@ -352,6 +388,7 @@ window.__ModuleLoader__.load({
         '.dsh-srt-icon svg{display:block}',
         // Replace the source plugin's 4px bar with the full-row tint.
         '.dsh-sc-chip{display:none!important}',
+        '.dsh-srt-menuitem{display:flex;align-items:center;gap:8px;width:100%;padding:6px 10px;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}',
         '.dsh-srt-panel{position:fixed;z-index:2147483001;box-sizing:border-box;width:300px;max-height:calc(100vh - 16px);overflow:auto;padding:14px;border:1px solid rgba(120,120,130,.25);border-radius:16px;background:#f7f7f9;color:#1d1d1f;box-shadow:0 20px 56px rgba(0,0,0,.38),0 0 0 1px rgba(0,0,0,.04);font:400 13px Inter,ui-sans-serif,system-ui,-apple-system,"PingFang SC",sans-serif}',
         '.dsh-srt-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}',
         '.dsh-srt-head b{font-size:14px;font-weight:600}',
@@ -418,7 +455,11 @@ window.__ModuleLoader__.load({
     }
 
     function RowTintLayer() {
-      const [decorations, setDecorations] = React.useState({ workspaces: {}, sessions: {}, favorites: null })
+      const decorations = useDecorations()
+      const setDecorations = (next) => {
+        const prev = decorGet()
+        decorSet(typeof next === 'function' ? next(prev) : next)
+      }
       const [picker, setPicker] = React.useState(null)
       const [layer, setLayer] = React.useState({ items: [], icons: [], clip: 'none', zIndex: 1 })
       const [catalogReady, setCatalogReady] = React.useState(false)
@@ -476,6 +517,8 @@ window.__ModuleLoader__.load({
               if (typeof body[key] === 'number' && Number.isFinite(body[key])) SETTINGS[key] = body[key]
             }
             setSettingsVersion((value) => value + 1)
+            // Slot components read SETTINGS directly; nudge them to re-render.
+            decorSet({ ...decorGet() })
           } catch {
             if (!cancelled) timer = setTimeout(load, 3000)
           }
@@ -587,32 +630,9 @@ window.__ModuleLoader__.load({
                 seenTitles.add(titleEl)
               }
             }
-            if (sdec !== undefined && sdec.icon !== undefined) {
-              const slot = row.querySelector('span[class*="_slot"]')
-              // The custom icon lives in the status slot; when the slot has a
-              // real status glyph (spinner, dot from another plugin, ...), that
-              // glyph wins and the custom icon is not drawn at all.
-              if (slot !== null && !slotHasStatus(slot)) {
-                try {
-                  const slotBox = slot.getBoundingClientRect()
-                  if (slotBox.height > 0) {
-                    const size = SETTINGS.sessionIconSize
-                    icons.push({
-                      key: `si:${id}`,
-                      kind: 'session',
-                      left: slotBox.left + (slotBox.width - size) / 2,
-                      top: slotBox.top + (slotBox.height - size) / 2,
-                      width: size,
-                      height: size,
-                      value: sdec.icon,
-                      color: sdec.color,
-                    })
-                  }
-                } catch {
-                  // No icon geometry this frame.
-                }
-              }
-            }
+            // Session icons are rendered by the `sidebar.session.row.leading`
+            // slot component now (see SessionLeadingIcon), not the overlay.
+            void sdec
           }
 
           for (const svg of Array.from(hiddenSvgs)) {
@@ -727,10 +747,12 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         const decorateMenus = () => {
           try {
-            // DSH renders a row's menu in a body portal, not inside the row; the
-            // row only gains a `*menuOpen` class while its menu is open.
-            const openRows = document.querySelectorAll('[class*="menuOpen"][data-row-key]')
-            if (openRows.length === 0) return
+            // Session row menus get their item from the official
+            // `sidebar.workspaces.session.menu.item` slot; only workspace row
+            // menus (no slot for them) are augmented here.
+            const openRows = [...document.querySelectorAll('[class*="menuOpen"][data-row-key]')]
+            const row = openRows.find((candidate) => workspaceIdOf(candidate) !== undefined)
+            if (row === undefined) return
             const items = [...document.querySelectorAll('[role="menuitem"]')].filter((el) => {
               const rect = el.getBoundingClientRect()
               return rect.width > 0 && rect.height > 0
@@ -741,11 +763,10 @@ window.__ModuleLoader__.load({
             const container = wrapper === null || wrapper === undefined ? null : wrapper.parentElement
             if (container === null || container === undefined) return
             if (container.querySelector('[data-dsh-srt-item]') !== null) return
-            const row = openRows[0]
             const wid = workspaceIdOf(row)
-            const id = wid !== undefined ? wid : sessionIdOf(row)
-            if (id === undefined) return
-            const kind = wid !== undefined ? 'workspace' : 'session'
+            if (wid === undefined) return
+            const id = wid
+            const kind = 'workspace'
             // Clone the sample item so the row matches DSH's menu styling, then
             // swap its icon for a palette and its label for ours.
             const clone = sample.cloneNode(true)
@@ -812,6 +833,11 @@ window.__ModuleLoader__.load({
           text: '',
           uploadError: '',
         })
+      }
+      PICKER_REQUEST.current = (kind, id) => {
+        const prefix = kind === 'workspace' ? WORKSPACE_ROW_KEY : SESSION_ROW_KEY
+        const target = document.querySelector(`[data-row-key="${prefix}${id}"]`)
+        openPickerRef.current(target || document.body, kind, id)
       }
 
       // Close on outside click or Escape.
@@ -1221,6 +1247,64 @@ window.__ModuleLoader__.load({
       return h(React.Fragment, null, portal(layerNode), panel === null ? null : portal(panel))
     }
 
+    /** Official slot: a "颜色 / 图标" item in a Session row's own "..." menu. */
+    function SessionMenuItem(props) {
+      const sessionId = props === null || props === undefined ? undefined : props.sessionId
+      if (typeof sessionId !== 'string' || sessionId === '') return null
+      const palette = svgMarkup(LUCIDE_PREFIX + 'palette', 16)
+      const icon = h('span', { style: { display: 'inline-flex', color: 'currentColor' }, dangerouslySetInnerHTML: { __html: palette } })
+      const onSelect = () => requestPicker('session', sessionId)
+      if (typeof MenuItemButton === 'function') {
+        return h(MenuItemButton, { icon, onSelect }, '颜色 / 图标')
+      }
+      return h('button', { type: 'button', className: 'dsh-srt-menuitem', onClick: onSelect }, '颜色 / 图标')
+    }
+
+    /**
+     * Official slot: the custom icon in a Session row's leading area. DSH renders
+     * the running spinner itself; when that (or a status text) is present we hide
+     * our icon so the status wins — otherwise the custom icon shows.
+     */
+    function SessionLeadingIcon(props) {
+      const sessionId = props === null || props === undefined ? undefined : props.sessionId
+      const decorations = useDecorations()
+      const sdec = typeof sessionId === 'string' ? ((decorations.sessions || {})[sessionId]) : undefined
+      const hasIcon = sdec !== undefined && sdec.icon !== undefined
+      const ref = React.useRef(null)
+      const [blocked, setBlocked] = React.useState(false)
+      React.useLayoutEffect(() => {
+        const node = ref.current
+        if (node === null) return undefined
+        let slot = node.parentElement
+        while (slot !== null && slot !== undefined && !(typeof slot.className === 'string' && slot.className.includes('_slot'))) slot = slot.parentElement
+        if (slot === null || slot === undefined) return undefined
+        const check = () => {
+          const spinner = slot.querySelector('svg[data-state]') !== null
+          const running = /running|加载/i.test((slot.textContent || '').trim())
+          setBlocked(spinner || running)
+        }
+        check()
+        let observer
+        try {
+          observer = new MutationObserver(check)
+          observer.observe(slot, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-state', 'class'] })
+        } catch {
+          observer = undefined
+        }
+        return () => { if (observer) observer.disconnect() }
+      }, [sessionId, hasIcon])
+      if (!hasIcon) return h('span', { ref, style: { display: 'none' } })
+      const size = SETTINGS.sessionIconSize
+      const content = blocked ? null : iconElement(sdec.icon, size, sdec.color)
+      return h('span', {
+        ref,
+        className: 'dsh-srt-leading-icon',
+        style: blocked
+          ? { display: 'none' }
+          : { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: `${size}px`, height: `${size}px`, flex: 'none', marginRight: '4px' },
+      }, content)
+    }
+
     /** Required service: the `shell.overlay` slot. */
     exports.inject = ['slots']
 
@@ -1242,6 +1326,22 @@ window.__ModuleLoader__.load({
         ))
       } catch {
         // No shell.overlay in this build; nothing to draw on.
+      }
+      try {
+        ctx.slots.inject('sidebar.workspaces.session.menu.item', () => ctx.slots.register(
+          { name: 'sidebar.workspaces.session.menu.item', id: 'dsh-session-row-tint-menu', order: 50, label: '颜色 / 图标' },
+          (props) => h(SessionMenuItem, props || {}),
+        ))
+      } catch {
+        // No session menu slot in this build; nothing to add.
+      }
+      try {
+        ctx.slots.inject('sidebar.session.row.leading', () => ctx.slots.register(
+          { name: 'sidebar.session.row.leading', id: 'dsh-session-row-tint-leading', order: 40 },
+          (props) => h(SessionLeadingIcon, props || {}),
+        ))
+      } catch {
+        // No leading slot in this build; nothing to add.
       }
     }
 
