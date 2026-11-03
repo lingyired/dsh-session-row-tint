@@ -431,6 +431,9 @@ window.__ModuleLoader__.load({
       const openPickerRef = React.useRef(() => {})
       const panelRef = React.useRef(null)
       const fileRef = React.useRef(null)
+      const itemRefs = React.useRef(new Map())
+      const iconRefs = React.useRef(new Map())
+      const syncRef = React.useRef(() => {})
 
       // Load the icon catalogue once (retry on failure).
       React.useEffect(() => {
@@ -489,6 +492,7 @@ window.__ModuleLoader__.load({
         let disposed = false
         let frame
         let settle = 0
+        let moveTimer
         const marks = { current: {} }
         const hiddenSvgs = new Set()
         const coloredTitles = new Set()
@@ -662,7 +666,16 @@ window.__ModuleLoader__.load({
           }
         }
 
-        const onMove = () => follow()
+        const onMove = () => {
+          // Reposition the overlay synchronously during the scroll gesture so
+          // the fixed layer keeps up with the scrolling rows (no one-frame lag
+          // that reads as jitter). Do not re-render mid-gesture: a React pass
+          // with an older measurement would fight this and reintroduce jitter,
+          // so only settle once the gesture goes quiet.
+          syncRef.current()
+          if (moveTimer !== undefined) clearTimeout(moveTimer)
+          moveTimer = setTimeout(follow, 140)
+        }
         const interval = setInterval(load, POLL_MS)
         document.addEventListener('scroll', onMove, true)
         window.addEventListener('resize', onMove, true)
@@ -687,6 +700,7 @@ window.__ModuleLoader__.load({
           window.removeEventListener('focus', load)
           document.removeEventListener('visibilitychange', load)
           if (observer) observer.disconnect()
+          if (moveTimer !== undefined) clearTimeout(moveTimer)
           cancelFrame(frame)
           for (const svg of hiddenSvgs) {
             try { svg.style.visibility = '' } catch {}
@@ -965,8 +979,53 @@ window.__ModuleLoader__.load({
         save(picker.kind, picker.id, { color: null, icon: null })
       }
 
+      // Direct DOM position sync, driven from the scroll handler.
+      syncRef.current = () => {
+        const workspaces = workspaceRows()
+        const container = workspaces.length > 0 ? scrollContainerOf(workspaces[0]) : null
+        const containerBottom = container === null ? null : container.getBoundingClientRect().bottom
+        for (const [key, node] of itemRefs.current) {
+          if (!key.startsWith('w:')) continue
+          const row = document.querySelector(`[data-row-key="${WORKSPACE_ROW_KEY}${key.slice(2)}"]`)
+          if (row === null) continue
+          const box = row.getBoundingClientRect()
+          let bottom = box.bottom
+          const index = workspaces.indexOf(row)
+          if (index >= 0 && index + 1 < workspaces.length) bottom = workspaces[index + 1].getBoundingClientRect().top - 2
+          else if (containerBottom !== null) bottom = Math.min(containerBottom, window.innerHeight) - 2
+          if (!(bottom > box.top)) bottom = box.bottom
+          node.style.left = `${box.left + 2}px`
+          node.style.top = `${box.top + 1}px`
+          node.style.width = `${Math.max(0, box.width - 4)}px`
+          node.style.height = `${Math.max(20, bottom - box.top - 1)}px`
+        }
+        for (const [key, node] of iconRefs.current) {
+          const kind = key.startsWith('wi:') ? 'workspace' : 'session'
+          const id = key.slice(3)
+          const prefix = kind === 'workspace' ? WORKSPACE_ROW_KEY : SESSION_ROW_KEY
+          const row = document.querySelector(`[data-row-key="${prefix}${id}"]`)
+          if (row === null) continue
+          let box = null
+          if (kind === 'workspace') {
+            const folder = row.querySelector('span[class*="_folder"]')
+            if (folder !== null) box = folder.getBoundingClientRect()
+          } else {
+            const slot = row.querySelector('span[class*="_slot"]')
+            if (slot !== null) box = slot.getBoundingClientRect()
+          }
+          if (box === null || box.height === 0) continue
+          const size = kind === 'workspace' ? SETTINGS.workspaceIconSize : SETTINGS.sessionIconSize
+          node.style.left = `${box.left + (box.width - size) / 2}px`
+          node.style.top = `${box.top + (box.height - size) / 2}px`
+        }
+      }
+
       const rows = layer.items.map((item) => h('div', {
         key: item.key,
+        ref: (node) => {
+          if (node === null) itemRefs.current.delete(item.key)
+          else itemRefs.current.set(item.key, node)
+        },
         className: 'dsh-srt-row',
         style: {
           left: `${item.left}px`,
@@ -986,6 +1045,10 @@ window.__ModuleLoader__.load({
         const top = icon.top + (icon.height - size) / 2
         return h('span', {
           key: icon.key,
+          ref: (node) => {
+            if (node === null) iconRefs.current.delete(icon.key)
+            else iconRefs.current.set(icon.key, node)
+          },
           className: 'dsh-srt-icon',
           style: { left: `${left}px`, top: `${top}px`, width: `${size}px`, height: `${size}px` },
         }, node)
