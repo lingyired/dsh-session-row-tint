@@ -24,6 +24,7 @@
 - **会话行**「...」→「颜色 / 图标」：设置该会话标题文字颜色与左侧图标。
 - 面板支持：18 个预设颜色一键选用、系统取色器、可搜索的图标库（约 410 个：266 个精选日常 [Lucide](https://lucide.dev) 图标 + 143 个品牌 logo，来源 [Simple Icons](https://simpleicons.org) 与 [LobeHub Icons](https://lobehub.com/zh/icons/)），含微信 / 支付宝 / B 站 / 知乎 / 微博 / 淘宝 / 小红书 等中文社区，以及 OpenAI / Claude / Gemini / DeepSeek / Qwen / Kimi / 豆包 / 文心 / 智谱 / 混元 / 星火 / 百川 / 阶跃 / 商汤 / MiniMax / 魔搭 / 硅基流动 等国内外 AI 与厂商；按英文名或中文关键词搜索，也可直接输入 emoji / 文字。
 - 图标目录由宿主路由 `GET /plugins/dsh-session-row-tint/icons` 提供（数据在 `src/icons.json`），不打包进前端，便于扩充。
+- 图标网格**显示全部图标**（不搜索时按「常用优先 + 字母序」全部列出），并用**虚拟列表**按需渲染可见行（8 列固定行高 + 少量 overscan），几百个图标也不卡。
 - 颜色/图标按 id 存到一个 JSON 文件（原子写入），跨重启保留。
 
 ## 安装

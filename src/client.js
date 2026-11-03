@@ -58,6 +58,14 @@ window.__ModuleLoader__.load({
     const STYLE_ID = 'dsh-session-row-tint-style'
     const PANEL_WIDTH = 300
     const PANEL_HEIGHT = 440
+    // Icon grid is virtualised: fixed 8-column rows of a known height, so only
+    // the visible rows (plus a little overscan) are in the DOM.
+    const GRID_COLUMNS = 8
+    const GRID_CELL = 30
+    const GRID_GAP = 4
+    const GRID_ROW = GRID_CELL + GRID_GAP
+    const GRID_VIEW = 196
+    const GRID_OVERSCAN = 3
 
     /** Preset colours offered as one-click swatches. */
     const PRESET_COLORS = [
@@ -140,7 +148,21 @@ window.__ModuleLoader__.load({
     function searchIcons(query) {
       if (!CATALOG.ready) return []
       const q = String(query || '').trim().toLowerCase()
-      if (q === '') return CATALOG.popular.slice(0, 64)
+      if (q === '') {
+        // No query: show every icon, popular ones first, then the rest A–Z.
+        const seen = new Set()
+        const ordered = []
+        for (const value of CATALOG.popular) {
+          if (CATALOG.icons[value] !== undefined && !seen.has(value)) {
+            seen.add(value)
+            ordered.push(value)
+          }
+        }
+        const rest = Object.keys(CATALOG.icons)
+          .filter((value) => !seen.has(value))
+          .sort((a, b) => iconName(a).localeCompare(iconName(b)))
+        return ordered.concat(rest)
+      }
       const found = new Set()
       for (const term of Object.keys(CATALOG.keywords)) {
         if (q.includes(term.toLowerCase()) || term.toLowerCase().includes(q)) {
@@ -150,7 +172,7 @@ window.__ModuleLoader__.load({
       for (const value of Object.keys(CATALOG.icons)) {
         if (iconName(value).toLowerCase().includes(q)) found.add(value)
       }
-      return [...found].slice(0, 96)
+      return [...found]
     }
 
     function sessionRows() {
@@ -264,8 +286,9 @@ window.__ModuleLoader__.load({
         '.dsh-srt-mini{height:30px;padding:0 10px;border:1px solid rgba(0,0,0,.15);border-radius:8px;background:#fff;color:#374151;font:inherit;cursor:pointer;flex:none}',
         '.dsh-srt-mini:hover{background:#eef1f6}',
         '.dsh-srt-search{box-sizing:border-box;width:100%;height:32px;margin-bottom:10px;padding:0 10px;border:1px solid rgba(0,0,0,.15);border-radius:9px;background:#fff;color:#1d1d1f;font:inherit}',
-        '.dsh-srt-icongrid{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;max-height:196px;overflow:auto;padding:2px;margin-bottom:12px;border-radius:10px;background:rgba(0,0,0,.02)}',
-        '.dsh-srt-iconbtn{display:flex;align-items:center;justify-content:center;width:100%;aspect-ratio:1/1;padding:0;border:1px solid transparent;border-radius:8px;background:#fff;color:#374151;cursor:pointer}',
+        '.dsh-srt-icongrid{position:relative;height:196px;overflow:auto;padding:2px;margin-bottom:12px;border-radius:10px;background:rgba(0,0,0,.02)}',
+        '.dsh-srt-vrow{position:absolute;left:0;right:0;display:grid;grid-template-columns:repeat(8,1fr);gap:4px}',
+        '.dsh-srt-iconbtn{display:flex;align-items:center;justify-content:center;width:100%;height:30px;padding:0;border:1px solid transparent;border-radius:8px;background:#fff;color:#374151;cursor:pointer}',
         '.dsh-srt-iconbtn:hover{background:#eef3fb;border-color:rgba(37,99,235,.35)}',
         '.dsh-srt-iconbtn.is-sel{background:#e8f0fe;border-color:#2563eb;color:#1d4ed8}',
         '.dsh-srt-empty{grid-column:1/-1;padding:14px;color:#9ca3af;text-align:center;font-size:12px}',
@@ -305,6 +328,8 @@ window.__ModuleLoader__.load({
       const [picker, setPicker] = React.useState(null)
       const [layer, setLayer] = React.useState({ items: [], icons: [], clip: 'none', zIndex: 1 })
       const [catalogReady, setCatalogReady] = React.useState(false)
+      const [gridScroll, setGridScroll] = React.useState(0)
+      const gridRef = React.useRef(null)
       const decorationsRef = React.useRef(decorations)
       decorationsRef.current = decorations
       const followRef = React.useRef(() => {})
@@ -639,6 +664,13 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => { followRef.current() }, [decorations, catalogReady])
 
+      // Reset the icon grid scroll to the top when the target or query changes.
+      const gridResetKey = picker === null ? '' : `${picker.kind}:${picker.id}:${picker.query}`
+      React.useEffect(() => {
+        if (gridRef.current !== null) gridRef.current.scrollTop = 0
+        setGridScroll(0)
+      }, [gridResetKey])
+
       const save = async (kind, id, patch) => {
         const route = kind === 'workspace' ? WORKSPACES_ROUTE : SESSIONS_ROUTE
         const body = kind === 'workspace' ? { workspaceId: id, ...patch } : { sessionId: id, ...patch }
@@ -709,6 +741,10 @@ window.__ModuleLoader__.load({
       }, [...rows, ...iconEls])
 
       const iconResults = picker === null ? [] : searchIcons(picker.query)
+      const totalRows = Math.ceil(iconResults.length / GRID_COLUMNS)
+      const scrollTop = Math.min(gridScroll, Math.max(0, (totalRows - 1) * GRID_ROW))
+      const startRow = Math.max(0, Math.min(totalRows, Math.floor(scrollTop / GRID_ROW) - GRID_OVERSCAN))
+      const endRow = Math.max(startRow, Math.min(totalRows, Math.ceil((scrollTop + GRID_VIEW) / GRID_ROW) + GRID_OVERSCAN))
       const panel = picker === null ? null : h('div', {
         className: 'dsh-srt-panel',
         role: 'dialog',
@@ -747,20 +783,36 @@ window.__ModuleLoader__.load({
           value: picker.query,
           onChange: (event) => setPicker({ ...picker, query: event.target.value }),
         }),
-        h('div', { className: 'dsh-srt-icongrid' },
+        h('div', {
+          className: 'dsh-srt-icongrid',
+          ref: gridRef,
+          onScroll: (event) => setGridScroll(event.currentTarget.scrollTop),
+        },
           !CATALOG.ready
             ? h('div', { className: 'dsh-srt-empty' }, '图标加载中…')
             : iconResults.length === 0
               ? h('div', { className: 'dsh-srt-empty' }, '没有匹配的图标')
-              : iconResults.map((value) => h('button', {
-                key: value,
-                type: 'button',
-                className: `dsh-srt-iconbtn${picker.icon === value ? ' is-sel' : ''}`,
-                title: iconName(value),
-                'aria-label': `使用图标 ${iconName(value)}`,
-                onClick: () => applyIcon(value),
-                dangerouslySetInnerHTML: { __html: svgMarkup(value, 18) },
-              })),
+              : h('div', { style: { position: 'relative', height: `${totalRows * GRID_ROW}px` } },
+                Array.from({ length: Math.max(0, endRow - startRow) }, (_, offset) => {
+                  const row = startRow + offset
+                  const buttons = []
+                  for (let col = 0; col < GRID_COLUMNS; col += 1) {
+                    const index = row * GRID_COLUMNS + col
+                    if (index >= iconResults.length) break
+                    const value = iconResults[index]
+                    buttons.push(h('button', {
+                      key: value,
+                      type: 'button',
+                      className: `dsh-srt-iconbtn${picker.icon === value ? ' is-sel' : ''}`,
+                      title: iconName(value),
+                      'aria-label': `使用图标 ${iconName(value)}`,
+                      onClick: () => applyIcon(value),
+                      dangerouslySetInnerHTML: { __html: svgMarkup(value, 18) },
+                    }))
+                  }
+                  return h('div', { key: row, className: 'dsh-srt-vrow', style: { top: `${row * GRID_ROW}px` } }, buttons)
+                }),
+              ),
         ),
         h('div', { className: 'dsh-srt-inline', style: { marginBottom: '12px' } },
           h('input', {
