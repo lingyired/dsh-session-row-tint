@@ -334,6 +334,7 @@ window.__ModuleLoader__.load({
       decorationsRef.current = decorations
       const followRef = React.useRef(() => {})
       const openPickerRef = React.useRef(() => {})
+      const panelRef = React.useRef(null)
 
       // Load the icon catalogue once (retry on failure).
       React.useEffect(() => {
@@ -662,6 +663,23 @@ window.__ModuleLoader__.load({
         }
       }, [picker])
 
+      // Keep the whole panel inside the viewport: after it mounts, measure its
+      // real height and, if it would overflow the bottom (e.g. opened from a row
+      // near the bottom), slide it up so its bottom edge stays on screen.
+      React.useLayoutEffect(() => {
+        const el = panelRef.current
+        if (picker === null || el === null) return
+        const margin = 8
+        const rect = el.getBoundingClientRect()
+        const maxX = Math.max(margin, window.innerWidth - rect.width - margin)
+        const maxY = Math.max(margin, window.innerHeight - rect.height - margin)
+        const nx = Math.min(Math.max(margin, picker.x), maxX)
+        const ny = Math.min(Math.max(margin, picker.y), maxY)
+        if (nx !== picker.x || ny !== picker.y) {
+          setPicker((prev) => (prev === null ? prev : { ...prev, x: nx, y: ny }))
+        }
+      }, [picker])
+
       React.useEffect(() => { followRef.current() }, [decorations, catalogReady])
 
       // Reset the icon grid scroll to the top when the target or query changes.
@@ -747,6 +765,7 @@ window.__ModuleLoader__.load({
       const endRow = Math.max(startRow, Math.min(totalRows, Math.ceil((scrollTop + GRID_VIEW) / GRID_ROW) + GRID_OVERSCAN))
       const panel = picker === null ? null : h('div', {
         className: 'dsh-srt-panel',
+        ref: panelRef,
         role: 'dialog',
         'aria-label': picker.kind === 'workspace' ? '工作区颜色 / 图标' : '会话颜色 / 图标',
         style: { left: `${picker.x}px`, top: `${picker.y}px` },

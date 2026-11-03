@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-row-tint",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "DSH web plugin: per-Session and per-workspace colour + emoji icon decorations in the sidebar.",
   "type": "module",
   "license": "MIT",
