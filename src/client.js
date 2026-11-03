@@ -389,6 +389,13 @@ window.__ModuleLoader__.load({
         // Replace the source plugin's 4px bar with the full-row tint.
         '.dsh-sc-chip{display:none!important}',
         '.dsh-srt-menuitem{display:flex;align-items:center;gap:8px;width:100%;padding:6px 10px;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}',
+        '.dsh-srt-settings{display:flex;flex-direction:column;gap:10px;padding:4px 0}',
+        '.dsh-srt-set-row{display:flex;align-items:center;gap:12px}',
+        '.dsh-srt-set-label{width:110px;flex:none;color:var(--dsw-alias-label-secondary,#6b7280);font-size:12px}',
+        '.dsh-srt-set-range{flex:1;min-width:0}',
+        '.dsh-srt-set-value{width:46px;text-align:right;font-variant-numeric:tabular-nums;font-size:12px;color:var(--dsw-alias-label-primary,#1d1d1f)}',
+        '.dsh-srt-set-foot{display:flex;justify-content:flex-end}',
+        '.dsh-srt-set-empty{color:var(--dsw-alias-label-tertiary,#9ca3af);font-size:12px}',
         '.dsh-srt-panel{position:fixed;z-index:2147483001;box-sizing:border-box;width:300px;max-height:calc(100vh - 16px);overflow:auto;padding:14px;border:1px solid rgba(120,120,130,.25);border-radius:16px;background:#f7f7f9;color:#1d1d1f;box-shadow:0 20px 56px rgba(0,0,0,.38),0 0 0 1px rgba(0,0,0,.04);font:400 13px Inter,ui-sans-serif,system-ui,-apple-system,"PingFang SC",sans-serif}',
         '.dsh-srt-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}',
         '.dsh-srt-head b{font-size:14px;font-weight:600}',
@@ -1247,6 +1254,73 @@ window.__ModuleLoader__.load({
       return h(React.Fragment, null, portal(layerNode), panel === null ? null : portal(panel))
     }
 
+    const EMPTY_SCOPE = {
+      subscribe: () => () => {},
+      getSnapshot: () => ({ value: {} }),
+    }
+
+    /** Settings card rendered on the Plugins page for this bundle. */
+    function SettingsCard(props) {
+      const scope = props === null || props === undefined ? undefined : props.scope
+      const view = props === null || props === undefined ? 'page' : props.view
+      const scopeUsable = scope !== undefined && scope !== null && typeof scope.subscribe === 'function'
+      const activeScope = scopeUsable ? scope : EMPTY_SCOPE
+      const snapshot = React.useSyncExternalStore(
+        (listener) => activeScope.subscribe(listener),
+        () => activeScope.getSnapshot(),
+        () => activeScope.getSnapshot(),
+      )
+      const value = snapshot !== undefined && snapshot !== null && typeof snapshot === 'object' ? (snapshot.value || {}) : {}
+      const read = (key, fallback) => (typeof value[key] === 'number' ? value[key] : fallback)
+      const current = {
+        workspaceIconSize: read('workspaceIconSize', SETTINGS.workspaceIconSize),
+        sessionIconSize: read('sessionIconSize', SETTINGS.sessionIconSize),
+        workspaceFontSize: read('workspaceFontSize', SETTINGS.workspaceFontSize),
+      }
+      if (view === 'summary') {
+        return h('span', null, `工作区图标 ${current.workspaceIconSize}px · 会话图标 ${current.sessionIconSize}px · 工作区字号 ${current.workspaceFontSize}px`)
+      }
+      const bounds = {
+        workspaceIconSize: [10, 48, 22],
+        sessionIconSize: [8, 40, 14],
+        workspaceFontSize: [9, 28, 15],
+      }
+      const write = (key, raw) => {
+        const n = Number(raw)
+        if (!Number.isFinite(n) || scope === undefined || scope === null) return
+        const [min, max] = bounds[key]
+        const next = Math.min(max, Math.max(min, Math.round(n)))
+        SETTINGS[key] = next
+        decorSet({ ...decorGet() })
+        try { scope.set(key, next) } catch {}
+      }
+      const row = (key, label) => {
+        const [min, max] = bounds[key]
+        return h('div', { className: 'dsh-srt-set-row' },
+          h('label', { className: 'dsh-srt-set-label' }, label),
+          h('input', {
+            className: 'dsh-srt-set-range', type: 'range', min, max, step: 1,
+            value: current[key],
+            'aria-label': label,
+            onChange: (event) => write(key, event.target.value),
+          }),
+          h('span', { className: 'dsh-srt-set-value' }, `${current[key]}px`),
+        )
+      }
+      const reset = () => {
+        for (const [key, spec] of Object.entries(bounds)) write(key, spec[2])
+      }
+      if (scope === undefined || scope === null) return h('div', { className: 'dsh-srt-set-empty' }, '设置暂不可用')
+      return h('div', { className: 'dsh-srt-settings' },
+        row('workspaceIconSize', '工作区图标大小'),
+        row('sessionIconSize', '会话图标大小'),
+        row('workspaceFontSize', '工作区标题字号'),
+        h('div', { className: 'dsh-srt-set-foot' },
+          h('button', { className: 'dsh-srt-btn', type: 'button', onClick: reset }, '恢复默认'),
+        ),
+      )
+    }
+
     /** Official slot: a "颜色 / 图标" item in a Session row's own "..." menu. */
     function SessionMenuItem(props) {
       const sessionId = props === null || props === undefined ? undefined : props.sessionId
@@ -1342,6 +1416,26 @@ window.__ModuleLoader__.load({
         ))
       } catch {
         // No leading slot in this build; nothing to add.
+      }
+      // Plugins page → this bundle's page: a graphical settings card.
+      try {
+        ctx.inject(['configForms'], (configCtx) => {
+          try {
+            const configForms = configCtx.configForms
+            if (configForms === undefined || configForms === null
+              || typeof configForms.get !== 'function' || typeof configForms.whileServed !== 'function') return
+            const key = 'dsh-session-row-tint'
+            const scope = configForms.get(key)
+            configCtx.effect(() => configForms.whileServed([key], () => configCtx.slots.inject('plugins.bundle.config', () => configCtx.slots.register(
+              { name: 'plugins.bundle.config', key },
+              (props) => h(SettingsCard, { ...(props || {}), scope }),
+            ))), 'dsh-session-row-tint: plugins-page card')
+          } catch {
+            // The config service may not be ready; settings stay YAML-only.
+          }
+        })
+      } catch {
+        // No configForms service in this build; settings stay YAML-only.
       }
     }
 
