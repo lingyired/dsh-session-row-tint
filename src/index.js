@@ -15,12 +15,24 @@
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join } from 'node:path'
+import z from '@deepseek-ai/schemastery'
 
 /** Mount name, kept in sync with package.json and the profile patch. */
 export const name = 'dsh-session-row-tint'
 
 /** Host services are acquired inside `apply`; nothing must exist beforehand. */
 export const inject = []
+
+/**
+ * Editable Config fields. Exporting this schema is what makes the bundle show
+ * its configuration card on the Plugins page (`plugins.bundle.config`).
+ */
+export const Config = z.object({
+  dataDir: z.string().required(false),
+  workspaceIconSize: z.number().min(10).max(48).default(22),
+  sessionIconSize: z.number().min(8).max(40).default(14),
+  workspaceFontSize: z.number().min(9).max(28).default(15),
+})
 
 /** Route prefix owned by this plugin; the browser half uses the same constant. */
 export const ROUTE_PREFIX = '/plugins/dsh-session-row-tint'
